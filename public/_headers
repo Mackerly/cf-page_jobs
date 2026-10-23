@@ -1,0 +1,8 @@
+# 静态资源的安全响应头（Pages 的 _headers 只作用于 public/ 里的静态文件；
+# 动态页面的响应头在 src/app.ts 的 htmlRes() 里设置）
+/favicon.svg
+  Cache-Control: public, max-age=604800
+  X-Content-Type-Options: nosniff
+
+/robots.txt
+  Cache-Control: public, max-age=3600

@@ -1,0 +1,8 @@
+User-agent: *
+Disallow: /add
+Disallow: /edit/
+Disallow: /import
+Disallow: /export/
+Disallow: /users
+Disallow: /audit
+Disallow: /password

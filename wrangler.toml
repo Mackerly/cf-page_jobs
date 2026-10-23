@@ -1,0 +1,24 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "recruit-pages"
+pages_build_output_dir = "public"
+compatibility_date = "2024-11-06"
+
+# D1 绑定。
+# 部署前先执行 `wrangler d1 create recruit`，把返回的 database_id 填到下面。
+# 填好之后，GitHub 自动构建时 Cloudflare 会读本文件自动创建绑定，不用再去控制台点。
+# 如果你不想把 database_id 提交到仓库，也可以删掉这一段，
+# 改在 Pages 控制台 Settings → Bindings → Add → D1 database，变量名填 DB。
+[[d1_databases]]
+binding = "DB"
+database_name = "recruit"
+database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+
+[vars]
+SITE_NAME = "招聘信息管理系统"
+# 是否开放自助注册（true / false）
+ALLOW_REGISTER = "true"
+# PBKDF2 迭代次数。Pages Functions 与 Worker 限额一致，免费版可降到 50000
+PBKDF2_ITERATIONS = "100000"
+
+# 本地开发：wrangler pages dev 会读 .dev.vars 里的 SESSION_SECRET / SETUP_TOKEN
+# 线上：在 Pages 控制台 Settings → Variables and Secrets 添加（SESSION_SECRET 建议加密）

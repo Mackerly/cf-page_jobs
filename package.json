@@ -1,0 +1,22 @@
+{
+  "name": "recruit-pages",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "招聘信息管理系统 · Cloudflare Pages + D1",
+  "scripts": {
+    "dev": "wrangler pages dev --port 8788",
+    "db:init": "wrangler d1 execute recruit --remote --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute recruit --local --persist-to .wrangler/state --file=./schema.sql",
+    "db:seed:local": "wrangler d1 execute recruit --local --persist-to .wrangler/state --file=./seed.sql",
+    "deploy": "wrangler pages deploy public",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "wrangler": "^3.90.0"
+  }
+}
