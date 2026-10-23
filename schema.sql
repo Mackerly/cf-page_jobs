@@ -14,8 +14,6 @@ CREATE TABLE IF NOT EXISTS recruit (
     updated_at   TEXT DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_recruit_created ON recruit(id DESC);
-
 CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     username    TEXT NOT NULL UNIQUE,
@@ -35,8 +33,6 @@ CREATE TABLE IF NOT EXISTS users (
     reg_ip      TEXT DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
-
 CREATE TABLE IF NOT EXISTS audit (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     ts       TEXT DEFAULT '',
@@ -46,8 +42,6 @@ CREATE TABLE IF NOT EXISTS audit (
     ip       TEXT DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(id DESC);
-
 -- 登录失败记录（用于限流，D1 里没有共享内存）
 CREATE TABLE IF NOT EXISTS login_fail (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,4 +50,7 @@ CREATE TABLE IF NOT EXISTS login_fail (
     ts       INTEGER NOT NULL DEFAULT 0          -- Unix 秒
 );
 
+CREATE INDEX IF NOT EXISTS idx_recruit_created ON recruit(id DESC);
+CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(id DESC);
 CREATE INDEX IF NOT EXISTS idx_login_fail ON login_fail(ip, username, ts);

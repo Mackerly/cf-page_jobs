@@ -85,7 +85,7 @@ function fileRes(c: Ctx, bytes: Uint8Array, filename: string, mime: string): Res
 }
 
 function layoutOpts(c: Ctx, title: string, active?: string): pages.LayoutOpts {
-  // SITE_NAME 可在 wrangler.toml / Pages 环境变量里改，页面标题、页头、页脚同步替换
+  // SITE_NAME 在 Pages 控制台的 Variables and Secrets 里配置，页面标题、页头、页脚同步替换
   const siteName = String(c.env.SITE_NAME || '').trim() || DEFAULT_SITE_NAME;
   return {
     title: title.split(DEFAULT_SITE_NAME).join(siteName),
@@ -121,7 +121,15 @@ export async function handleRequest(req: Request, env: db.Env): Promise<Response
   const secret = env.SESSION_SECRET;
   if (!secret || secret.length < 16) {
     return new Response(
-      '部署缺少 SESSION_SECRET。Pages 控制台：Settings → Variables and Secrets 添加 SESSION_SECRET（本地开发写到 .dev.vars）',
+      [
+        '部署缺少 SESSION_SECRET（至少 16 个字符）。',
+        '',
+        'Cloudflare 控制台 → Workers & Pages → 本项目 → Settings → Variables and Secrets',
+        '→ Add → 类型选 Secret，变量名 SESSION_SECRET，值填 openssl rand -hex 32 的输出，',
+        'Production 和 Preview 两个环境都要加，然后 Redeploy 一次。',
+        '',
+        '本地开发：写进 .dev.vars（参考 .dev.vars.example）。',
+      ].join('\n'),
       { status: 500, headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
     );
   }
@@ -297,7 +305,8 @@ async function handleSetup(c: Ctx, form: FormData | null): Promise<Response> {
   if (!expected) {
     return htmlRes(c, pages.errorPage(layoutOpts(c, '未配置初始化口令'), 403,
       '站点尚未配置初始化口令',
-      '请先执行 wrangler secret put SETUP_TOKEN 设置一个口令，再用 /setup?token=你的口令 访问本页。',
+      '请到 Cloudflare 控制台 → 本项目 → Settings → Variables and Secrets 添加 SETUP_TOKEN（Secret 类型），'
+      + '重新部署后再用 /setup?token=你的口令 访问本页；本地开发则写进 .dev.vars。',
       '🔧'), 403);
   }
   if (!auth.safeEqualText(given, expected)) {

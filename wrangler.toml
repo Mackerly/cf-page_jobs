@@ -1,24 +1,25 @@
 #:schema node_modules/wrangler/config-schema.json
+#
+# ⚠️ 这个文件只服务于「本地开发」（npm run dev / npm run deploy）。
+#    线上部署的配置全部在 Cloudflare 控制台里改，所以这里故意只留两行。
+#
+# 为什么不写 [vars] 和 [[d1_databases]]：
+#   Pages 的规则是「谁写配置谁就是配置源」——一旦 wrangler.toml 里出现
+#   pages_build_output_dir（或 vars / 绑定），控制台对应的字段就变成
+#   「只能看、不能改」，Settings → Variables and Secrets 里连“添加变量”按钮都没有。
+#   所以变量、机密、D1 绑定一律不写进本文件，改由控制台管理：
+#
+#     变量/机密：Settings → Variables and Secrets（Production 和 Preview 各加一套）
+#     D1 绑定  ：Settings → Bindings → Add → D1 database，Variable name 填 DB，选 recruit
+#                （本项目用的库 database_id = de6cdd39-f37b-4180-a837-9155415c3348，
+#                  控制台按库名选即可，不用手填 id）
+#
+# 本地开发时：
+#     变量   → .dev.vars（由 .dev.vars.example 复制，已被 .gitignore 忽略）
+#     D1     → npm run dev 里的 --d1=DB=recruit 参数
+#
+# 如果哪天控制台里还是显示「由 wrangler.toml 管理」，直接把本文件删掉即可：
+# 上一次部署的配置会保留，并且可以在控制台自由编辑。
+
 name = "recruit-pages"
-pages_build_output_dir = "public"
 compatibility_date = "2024-11-06"
-
-# D1 绑定。
-# 部署前先执行 `wrangler d1 create recruit`，把返回的 database_id 填到下面。
-# 填好之后，GitHub 自动构建时 Cloudflare 会读本文件自动创建绑定，不用再去控制台点。
-# 如果你不想把 database_id 提交到仓库，也可以删掉这一段，
-# 改在 Pages 控制台 Settings → Bindings → Add → D1 database，变量名填 DB。
-[[d1_databases]]
-binding = "DB"
-database_name = "recruit"
-database_id = "de6cdd39-f37b-4180-a837-9155415c3348"
-
-[vars]
-SITE_NAME = "招聘信息管理系统-洲到人社炎陵站"
-# 是否开放自助注册（true / false）
-ALLOW_REGISTER = "true"
-# PBKDF2 迭代次数。Pages Functions 与 Worker 限额一致，免费版可降到 50000
-PBKDF2_ITERATIONS = "100000"
-
-# 本地开发：wrangler pages dev 会读 .dev.vars 里的 SESSION_SECRET / SETUP_TOKEN
-# 线上：在 Pages 控制台 Settings → Variables and Secrets 添加（SESSION_SECRET 建议加密）

@@ -54,7 +54,7 @@ cf-pages/
 ├── seed.sql               # 演示数据（admin/admin123 + 3 条示例）
 ├── scripts/
 │   └── reset-local-db.mjs # 本地库建表+灌数据（不依赖 wrangler 的 D1 声明）
-├── wrangler.toml          # 本地开发 + 环境变量（D1 绑定在控制台配）
+├── wrangler.toml          # 仅本地开发用；变量/机密/D1 绑定全部在控制台配（见第三节）
 ├── package.json
 └── tests/e2e.py           # 70 项端到端断言
 ```
@@ -81,16 +81,17 @@ database_name = "recruit"
 database_id = "1234abcd-12ab-34cd-56ef-1234567890ab"
 ```
 
-把这个 `database_id` 记下来，两种绑定方式**二选一**：
+把这个 `database_id` 记下来，**绑定统一在控制台做**：
 
-| 方式 | 做法 | 说明 |
-| --- | --- | --- |
-| A. 控制台绑定（当前仓库采用） | Pages 项目 → **Settings → Bindings → Add → D1 database**，Variable name 填 `DB`，选 `recruit` | `wrangler.toml` 里的 `[[d1_databases]]` 保持注释状态 |
-| B. 写进 `wrangler.toml` | 取消注释 `[[d1_databases]]`，把 `REPLACE_WITH_YOUR_DATABASE_ID` 换成真实 id | 构建时自动带上绑定，但 id 会进仓库 |
+> Pages 项目 → **Settings → Bindings → Add → D1 database**，Variable name 填 `DB`，选 `recruit`。
+> Production 和 Preview 两个环境各绑一次（预览部署默认连同一个库，见第五节第 3 条）。
 
 > ⚠️ **这一步不做，线上每个查库的页面都会 500**（报 `no such table: recruit` 或
 > `D1_ERROR`）。判断方法：`/health`、`/login` 正常但 `/` 500，就是没绑 D1。
-> 另外 `REPLACE_WITH_YOUR_DATABASE_ID` 是占位符，**直接提交会构建失败**，所以本仓库默认走方式 A。
+>
+> 也可以把 `[[d1_databases]]` 写进 `wrangler.toml`（填真实 `database_id`），但**不推荐**：
+> 一旦 wrangler.toml 参与线上配置，控制台的绑定和变量就变成「只能看、不能改」，
+> 以后加变量、换库都得改代码重新推。本仓库已经把这类配置从文件里全部拿掉了。
 
 ### 第 2 步：建表
 
@@ -142,19 +143,37 @@ git push -u origin main
    | Build output directory | `public` |
    | Root directory（可选） | **留空**（本仓库根就是项目根）；若仓库还放了别的东西则填 `cf-pages` |
 
-5. 展开 **Environment variables (advanced)**，添加：
+5. 展开 **Environment variables (advanced)**，添加下面 5 个（也可以在部署完成后再加，
+   见本节末尾的「配置项一览」）：
 
    | 变量名 | 值 | 类型 |
    | --- | --- | --- |
    | `SESSION_SECRET` | 32 位以上随机串（如 `openssl rand -hex 32` 的输出） | **Secret** |
    | `SETUP_TOKEN` | 自己定一个初始化口令，如 `init-2026-recruit` | **Secret** |
-   | `SITE_NAME` | 站点名称，如 `招聘信息管理系统-到人社炎陵站`（改这里就不用改代码） | Plaintext |
+   | `SITE_NAME` | 站点名称，如 `招聘信息管理系统-洲到人社炎陵站`（改这里就不用改代码） | Plaintext |
    | `ALLOW_REGISTER` | `true`（关闭注册改成 `false`） | Plaintext |
    | `PBKDF2_ITERATIONS` | `100000` | Plaintext |
 
    > Production 和 Preview 是两套环境变量，**两个都要加**，否则预览部署会报缺少 SESSION_SECRET。
 
 6. 点 **Save and Deploy**，等 1～2 分钟构建完成。
+
+#### 配置项一览（全部在控制台，代码仓库里不存任何密钥）
+
+所有配置都走 **Settings → Variables and Secrets**，`wrangler.toml` 里**不写** `[vars]`、
+也不写 D1 绑定——只要文件里出现这些配置，控制台对应字段就会变成只读，加不了新变量。
+改完变量点一下 **Redeploy** 才生效（环境变量是构建时注入的）。
+
+| 位置 | 配置 | 说明 |
+| --- | --- | --- |
+| Variables and Secrets | `SESSION_SECRET` / `SETUP_TOKEN` | 机密，建议用 Secret 类型（加密存储、页面不再显示明文） |
+| Variables and Secrets | `SITE_NAME` / `ALLOW_REGISTER` / `PBKDF2_ITERATIONS` | 普通变量，改了不用改代码 |
+| Bindings | `DB` → D1 `recruit` | 数据库绑定 |
+| Build → Build output directory | `public` | 构建设置，在控制台填，别写进 wrangler.toml |
+
+> 变量都有兜底默认值，漏配不会白屏：`SITE_NAME` 缺省为「招聘信息管理系统」，
+> `ALLOW_REGISTER` 缺省 `true`，`PBKDF2_ITERATIONS` 缺省 `100000`；
+> 只有 `SESSION_SECRET` 是硬性要求，缺了会直接提示怎么加。
 
 ### 第 5 步：创建第一个管理员
 
@@ -190,22 +209,26 @@ npm run dev                            # http://127.0.0.1:8788
 npm run db:reset:local                 # 另开一个终端：建表 + 演示数据
 ```
 
-`npm run dev` 已带 `--d1=DB=recruit`，会在 `.wrangler/state` 下自动建一个空的本地库；
+`npm run dev` 实际执行的是 `wrangler pages dev public --d1=DB=recruit --port 8788`：
+`public` 是静态目录，`--d1` 现场造一个名为 `recruit` 的本地 D1（`wrangler.toml` 里没有绑定声明），
+环境变量则来自 `.dev.vars`（`SITE_NAME`、`ALLOW_REGISTER`、`PBKDF2_ITERATIONS`、
+`SESSION_SECRET`、`SETUP_TOKEN` 五个都在里面）。
 `db:reset:local` 再往这个库里灌 `schema.sql` + `seed.sql`（用的是 Node 内置 sqlite，
 不依赖 wrangler 的 D1 声明）。**顺序不能反**：先起一次 `npm run dev` 生成本地库文件。
 
-> 之所以不用 `wrangler d1 execute`：`wrangler.toml` 里的 `[[d1_databases]]` 已被注释掉
-> （D1 绑定改在 Pages 控制台配置），此时 `wrangler d1 execute` 会报
+> 之所以不用 `wrangler d1 execute`：`wrangler.toml` 里没有 `[[d1_databases]]`
+> （D1 绑定在 Pages 控制台配置），此时 `wrangler d1 execute` 会报
 > `Couldn't find a D1 DB with the name or binding 'recruit'`。
-> 如果你把那段绑定恢复并填上真实 `database_id`，`npm run db:init:local` / `db:seed:local` 也能用。
+> 如果你临时把绑定写回 wrangler.toml 并填上真实 `database_id`，`npm run db:init:local` / `db:seed:local` 也能用，
+> 但记得用完删掉，否则控制台又会变只读。
 
 本地账号：`admin / admin123`。若本地库是空的，用
 `http://127.0.0.1:8788/setup?token=dev-setup-token` 创建管理员。
 
-站名由 `wrangler.toml` 的 `SITE_NAME`（线上则是环境变量）控制，会替换页面标题、页头品牌和页脚。
+站名在 `.dev.vars` 的 `SITE_NAME` 里改（线上则在控制台变量里改），会替换页面标题、页头品牌和页脚。
 
 > 本地 D1 与 `wrangler d1 execute --local` 共用 `.wrangler/state`，
-> 所以 `db:init:local` 建的表 `npm run dev` 能直接读到。改完 `wrangler.toml` 的绑定后要重启 dev。
+> 所以 `db:init:local` 建的表 `npm run dev` 能直接读到。
 
 常用命令：
 
@@ -258,7 +281,7 @@ Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态
 | 入口 | `export default { fetch(req, env, ctx) }` | `functions/[[path]].ts` 的 `export const onRequest` |
 | 业务入口 | `fetch()` 方法 | `src/app.ts` 的 `handleRequest(req, env)` |
 | 静态资源 | 代码里返回 | `public/` 目录托管 |
-| 绑定配置 | `wrangler.toml` + `wrangler secret` | 控制台变量 + `wrangler.toml`/控制台绑定 |
+| 绑定配置 | `wrangler.toml` + `wrangler secret` | **全部在控制台**（Variables and Secrets / Bindings），文件里不存配置 |
 | 本地端口 | 8787 | 8788 |
 | 其余业务代码 | —— | **完全相同**（同一套 `src/*.ts`） |
 
@@ -307,8 +330,22 @@ Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态
 
 ## 九、常见问题
 
+**控制台 Settings → Variables and Secrets 是灰的，加不了变量 / 看不到「Add」按钮**
+说明 `wrangler.toml` 参与了线上配置。Pages 的规则是：只要配置文件里出现 `pages_build_output_dir`、
+`[vars]` 或绑定，这个文件就成了「配置源」，控制台只能看不能改。
+本仓库已经把这些都从 `wrangler.toml` 删掉了，只留 `name` 和 `compatibility_date`。
+如果你自己又加回去了，删掉后重新部署一次，控制台就恢复可编辑；
+实在不放心可以直接删掉整个 `wrangler.toml`（上一次部署的配置会保留，仍可在控制台改）。
+
+> 删掉 `pages_build_output_dir` 后，**构建设置 → Build output directory 会变成可编辑**，
+> 值沿用上一次部署的 `public`，一般不用动；万一为空，手动填 `public` 再部署。
+
+**改了变量但页面没变**
+环境变量是构建时注入的，改完要点 **Redeploy**（或重新 push 一次）才生效；
+另外注意 Production 和 Preview 是两套变量，预览地址用的是 Preview 那套。
+
 **构建报 `Couldn't find a D1 DB with the name or binding 'recruit'`**
-`wrangler.toml` 里的 `database_id` 还是占位符，或者 `[[d1_databases]]` 被删了但没在控制台绑定。
+没有在控制台绑 D1。去 Settings → Bindings 加一条 D1 database，变量名 `DB`，选 `recruit`。
 
 **页面能打开但一访问就 500，日志里是 `no such table: recruit`**
 建表脚本没在**线上**库执行。跑 `npx wrangler d1 execute recruit --remote --file=./schema.sql`。
