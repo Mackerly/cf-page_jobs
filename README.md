@@ -93,19 +93,29 @@ npx wrangler d1 execute recruit --remote --file=./schema.sql
 
 ### 第 3 步：把代码推到 GitHub
 
-如果这个目录就是仓库根：
+本目录已经是一个独立的 git 仓库，远端就是 <https://github.com/Mackerly/cf-page_jobs>，
+分支 `main`，日常改动只需：
+
+```bash
+git add -A
+git commit -m "说明这次改了什么"
+git push
+```
+
+换一台机器或换仓库时，完整流程是：
 
 ```bash
 git init
 git add .
 git commit -m "招聘信息管理系统：Cloudflare Pages + D1"
 git branch -M main
-git remote add origin https://github.com/<你的账号>/<仓库名>.git
+git remote add origin https://github.com/Mackerly/cf-page_jobs.git
 git push -u origin main
 ```
 
-如果你把整个项目（含 Flask 版、cf-worker）一起推，仓库根就是上一层，**后面第 4 步要把
-Root directory 设成 `cf-pages`**。
+> 仓库根**就是**本目录（`cf-pages/` 的内容直接铺在根上），所以第 4 步的 Root directory 留空。
+> 如果你把整个项目（含 Flask 版、cf-worker）推到同一个仓库，仓库根就是上一层，
+> 那时 **Root directory 要填 `cf-pages`**。
 
 `.gitignore` 已经排除了 `node_modules/`、`.wrangler/`、`.dev.vars`，不会把密钥推上去。
 
@@ -123,7 +133,7 @@ Root directory 设成 `cf-pages`**。
    | Framework preset | `None` |
    | Build command | `npm install` |
    | Build output directory | `public` |
-   | Root directory（可选） | 仓库根就是本项目时留空；否则填 `cf-pages` |
+   | Root directory（可选） | **留空**（本仓库根就是项目根）；若仓库还放了别的东西则填 `cf-pages` |
 
 5. 展开 **Environment variables (advanced)**，添加：
 
