@@ -8,13 +8,13 @@ compatibility_date = "2024-11-06"
 # 填好之后，GitHub 自动构建时 Cloudflare 会读本文件自动创建绑定，不用再去控制台点。
 # 如果你不想把 database_id 提交到仓库，也可以删掉这一段，
 # 改在 Pages 控制台 Settings → Bindings → Add → D1 database，变量名填 DB。
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "recruit"
-# database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+[[d1_databases]]
+binding = "DB"
+database_name = "recruit"
+database_id = "de6cdd39-f37b-4180-a837-9155415c3348"
 
 [vars]
-SITE_NAME = "招聘信息管理系统-到人社炎陵站"
+SITE_NAME = "招聘信息管理系统-洲到人社炎陵站"
 # 是否开放自助注册（true / false）
 ALLOW_REGISTER = "true"
 # PBKDF2 迭代次数。Pages Functions 与 Worker 限额一致，免费版可降到 50000
