@@ -52,9 +52,11 @@ cf-pages/
 │   └── _routes.json       # 把静态资源排除出函数路由（关键！）
 ├── schema.sql             # 建表脚本
 ├── seed.sql               # 演示数据（admin/admin123 + 3 条示例）
-├── wrangler.toml          # 本地开发 + D1 绑定
+├── scripts/
+│   └── reset-local-db.mjs # 本地库建表+灌数据（不依赖 wrangler 的 D1 声明）
+├── wrangler.toml          # 本地开发 + 环境变量（D1 绑定在控制台配）
 ├── package.json
-└── tests/e2e.py           # 60 项端到端断言
+└── tests/e2e.py           # 70 项端到端断言
 ```
 
 ---
@@ -79,11 +81,16 @@ database_name = "recruit"
 database_id = "1234abcd-12ab-34cd-56ef-1234567890ab"
 ```
 
-把这个 `database_id` 填进 `wrangler.toml`（替换 `REPLACE_WITH_YOUR_DATABASE_ID`）。
+把这个 `database_id` 记下来，两种绑定方式**二选一**：
 
-> 不想把 database_id 提交到仓库？那就删掉 `wrangler.toml` 里的 `[[d1_databases]]` 整段，
-> 部署后到 Pages 控制台 **Settings → Bindings → Add → D1 database**，变量名填 `DB` 再重新部署。
-> 两种方式二选一，别重复绑定。
+| 方式 | 做法 | 说明 |
+| --- | --- | --- |
+| A. 控制台绑定（当前仓库采用） | Pages 项目 → **Settings → Bindings → Add → D1 database**，Variable name 填 `DB`，选 `recruit` | `wrangler.toml` 里的 `[[d1_databases]]` 保持注释状态 |
+| B. 写进 `wrangler.toml` | 取消注释 `[[d1_databases]]`，把 `REPLACE_WITH_YOUR_DATABASE_ID` 换成真实 id | 构建时自动带上绑定，但 id 会进仓库 |
+
+> ⚠️ **这一步不做，线上每个查库的页面都会 500**（报 `no such table: recruit` 或
+> `D1_ERROR`）。判断方法：`/health`、`/login` 正常但 `/` 500，就是没绑 D1。
+> 另外 `REPLACE_WITH_YOUR_DATABASE_ID` 是占位符，**直接提交会构建失败**，所以本仓库默认走方式 A。
 
 ### 第 2 步：建表
 
@@ -141,6 +148,7 @@ git push -u origin main
    | --- | --- | --- |
    | `SESSION_SECRET` | 32 位以上随机串（如 `openssl rand -hex 32` 的输出） | **Secret** |
    | `SETUP_TOKEN` | 自己定一个初始化口令，如 `init-2026-recruit` | **Secret** |
+   | `SITE_NAME` | 站点名称，如 `招聘信息管理系统-到人社炎陵站`（改这里就不用改代码） | Plaintext |
    | `ALLOW_REGISTER` | `true`（关闭注册改成 `false`） | Plaintext |
    | `PBKDF2_ITERATIONS` | `100000` | Plaintext |
 
@@ -178,15 +186,23 @@ cd cf-pages
 npm install
 cp .dev.vars.example .dev.vars        # Windows: copy .dev.vars.example .dev.vars
 
-# 建表 + 演示数据（写进 .wrangler/state 里的本地 D1）
-npm run db:init:local
-npm run db:seed:local
-
 npm run dev                            # http://127.0.0.1:8788
+npm run db:reset:local                 # 另开一个终端：建表 + 演示数据
 ```
+
+`npm run dev` 已带 `--d1=DB=recruit`，会在 `.wrangler/state` 下自动建一个空的本地库；
+`db:reset:local` 再往这个库里灌 `schema.sql` + `seed.sql`（用的是 Node 内置 sqlite，
+不依赖 wrangler 的 D1 声明）。**顺序不能反**：先起一次 `npm run dev` 生成本地库文件。
+
+> 之所以不用 `wrangler d1 execute`：`wrangler.toml` 里的 `[[d1_databases]]` 已被注释掉
+> （D1 绑定改在 Pages 控制台配置），此时 `wrangler d1 execute` 会报
+> `Couldn't find a D1 DB with the name or binding 'recruit'`。
+> 如果你把那段绑定恢复并填上真实 `database_id`，`npm run db:init:local` / `db:seed:local` 也能用。
 
 本地账号：`admin / admin123`。若本地库是空的，用
 `http://127.0.0.1:8788/setup?token=dev-setup-token` 创建管理员。
+
+站名由 `wrangler.toml` 的 `SITE_NAME`（线上则是环境变量）控制，会替换页面标题、页头品牌和页脚。
 
 > 本地 D1 与 `wrangler d1 execute --local` 共用 `.wrangler/state`，
 > 所以 `db:init:local` 建的表 `npm run dev` 能直接读到。改完 `wrangler.toml` 的绑定后要重启 dev。

@@ -24,6 +24,7 @@ const MAX_FAILS = 5;
 const LOCK_WINDOW = 300;          // 秒
 const MAX_REG_PER_HOUR = 5;
 const MAX_SELECTED = 200;         // 单次「导出选定为 Word」最大条数
+const DEFAULT_SITE_NAME = '招聘信息管理系统';   // SITE_NAME 未配置时的默认站名
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -84,8 +85,12 @@ function fileRes(c: Ctx, bytes: Uint8Array, filename: string, mime: string): Res
 }
 
 function layoutOpts(c: Ctx, title: string, active?: string): pages.LayoutOpts {
+  // SITE_NAME 可在 wrangler.toml / Pages 环境变量里改，页面标题、页头、页脚同步替换
+  const siteName = String(c.env.SITE_NAME || '').trim() || DEFAULT_SITE_NAME;
   return {
-    title, csrf: c.csrf, user: c.user, isAdmin: c.isAdmin,
+    title: title.split(DEFAULT_SITE_NAME).join(siteName),
+    siteName,
+    csrf: c.csrf, user: c.user, isAdmin: c.isAdmin,
     pendingCount: c.pending, allowRegister: c.allowRegister,
     flashes: c.flashes, active,
   };

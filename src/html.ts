@@ -29,6 +29,8 @@ export interface UserLike {
 
 export interface LayoutOpts {
   title: string;
+  /** 站点名称，来自环境变量 SITE_NAME，缺省「招聘信息管理系统」 */
+  siteName?: string;
   csrf: string;
   user?: UserLike | null;
   isAdmin?: boolean;
@@ -40,6 +42,7 @@ export interface LayoutOpts {
 
 export function layout(o: LayoutOpts, body: string): string {
   const u = o.user;
+  const site = o.siteName || '招聘信息管理系统';
   const lock = (cond: boolean) => (cond ? '<span class="lock" title="需登录">🔒</span>' : '');
   const flashes = (o.flashes || []).map(([cat, msg]) =>
     `<div class="flash ${h(cat)}">${h(msg)}</div>`).join('');
@@ -75,7 +78,7 @@ export function layout(o: LayoutOpts, body: string): string {
 </head>
 <body>
 <header class="topbar"><div class="wrap bar-inner">
-  <a class="brand" href="/"><span class="logo">招</span><span>招聘信息管理系统</span></a>
+  <a class="brand" href="/"><span class="logo">招</span><span>${h(site)}</span></a>
   <nav class="nav">${nav}</nav>
   <div class="userbox">${userbox}</div>
 </div></header>
@@ -84,7 +87,7 @@ export function layout(o: LayoutOpts, body: string): string {
   ${flashes}
   ${body}
 </main>
-<footer class="foot">招聘信息管理系统 · Cloudflare Pages + D1 · 每条招聘信息一键生成单页 A4 Word 简章</footer>
+<footer class="foot">${h(site)} · Cloudflare Pages + D1 · 每条招聘信息一键生成单页 A4 Word 简章</footer>
 </body>
 </html>`;
 }

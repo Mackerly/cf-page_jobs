@@ -5,8 +5,9 @@
   "type": "module",
   "description": "招聘信息管理系统 · Cloudflare Pages + D1",
   "scripts": {
-    "dev": "wrangler pages dev --port 8788",
+    "dev": "wrangler pages dev --d1=DB=recruit --port 8788",
     "db:init": "wrangler d1 execute recruit --remote --file=./schema.sql",
+    "db:reset:local": "node --experimental-sqlite scripts/reset-local-db.mjs",
     "db:init:local": "wrangler d1 execute recruit --local --persist-to .wrangler/state --file=./schema.sql",
     "db:seed:local": "wrangler d1 execute recruit --local --persist-to .wrangler/state --file=./seed.sql",
     "deploy": "wrangler pages deploy public",
