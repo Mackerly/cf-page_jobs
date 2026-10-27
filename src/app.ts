@@ -6,7 +6,8 @@
  *
  * 路由：
  *   公开：/  /preview/:id  /docx/:id  /qr.jpg  /login  /register
- *   需登录：/add /edit/:id /delete/:id /import /export/excel /docx/zip /template.xlsx /password
+ *   需登录：/add /edit/:id /delete/:id /import /export/excel /docx/zip /docx/range
+ *           /docx/selected /template.xlsx /password
  *   需管理员：/users /users/:id/action /audit
  */
 import { zipSync } from 'fflate';
@@ -16,7 +17,8 @@ import * as pages from './html';
 import { buildDocx, buildDocxMulti, qrBytes } from './docx';
 import { exportXlsx, buildTemplate } from './xlsx';
 import { parseImport } from './xlsx-import';
-import { FIELD_NAMES, docFilename, multiDocFilename, nowLocal, prepare } from './format';
+import { FIELD_NAMES, dateRange, docFilename, multiDocFilename, nowLocal, prepare,
+  rangeDocFilename, rangeLabel, rangeXlsxFilename } from './format';
 import { CSS } from './css';
 
 const PER_PAGE = 15;
@@ -24,6 +26,7 @@ const MAX_FAILS = 5;
 const LOCK_WINDOW = 300;          // 秒
 const MAX_REG_PER_HOUR = 5;
 const MAX_SELECTED = 200;         // 单次「导出选定为 Word」最大条数
+const MAX_RANGE = 300;            // 单次「按日期导出 Word」最大条数
 const DEFAULT_SITE_NAME = '招聘信息管理系统';   // SITE_NAME 未配置时的默认站名
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -236,7 +239,8 @@ async function route(c: Ctx): Promise<Response> {
 
   // ---- 需要登录 ----
   const needLogin = [
-    '/add', '/import', '/export/excel', '/docx/zip', '/docx/selected', '/template.xlsx', '/password',
+    '/add', '/import', '/export/excel', '/docx/zip', '/docx/range', '/docx/selected',
+    '/template.xlsx', '/password',
   ];
   const isProtected = needLogin.includes(pathname)
     || /^\/edit\/\d+$/.test(pathname) || /^\/delete\/\d+$/.test(pathname)
@@ -266,6 +270,7 @@ async function route(c: Ctx): Promise<Response> {
   if (pathname === '/export/excel') return handleExport(c);
   if (pathname === '/template.xlsx') return handleTemplate(c);
   if (pathname === '/docx/zip') return handleZip(c);
+  if (pathname === '/docx/range') return handleDocxRange(c);
   if (pathname === '/docx/selected') {
     return method === 'POST' ? handleDocxSelected(c, form!) : redirect(c, '/');
   }
@@ -593,8 +598,31 @@ async function handleDocxSelected(c: Ctx, form: FormData): Promise<Response> {
   return fileRes(c, bytes, multiDocFilename(rows.length), DOCX_MIME);
 }
 
-async function handleZip(c: Ctx): Promise<Response> {
+/**
+ * 按起止日期导出 → 同一个 Word，每条一页（需登录）。
+ * start / end 都可省略：只填一头表示「某天起」或「截至某天」，都不填等于全部。
+ */
+async function handleDocxRange(c: Ctx): Promise<Response> {
   const q = (c.url.searchParams.get('q') || '').trim();
+  const { start, end } = dateRange(c.url.searchParams.get('start'), c.url.searchParams.get('end'));
+
+  const rows = await db.listAllRecruit(c.env.DB, q, start, end);
+  if (!rows.length) {
+    await flash(c, 'error', `所选日期范围内没有招聘信息（${rangeLabel(start, end)}）`);
+    return redirect(c, '/');
+  }
+  if (rows.length > MAX_RANGE) {
+    await flash(c, 'error', `该日期范围共 ${rows.length} 条，一次最多导出 ${MAX_RANGE} 条，请缩小范围后重试`);
+    return redirect(c, '/');
+  }
+
+  const infos = rows.map((r: any) => prepare(r, true));
+  const bytes = buildDocxMulti(infos);
+  await audit(c, '按日期导出 Word', `共 ${rows.length} 份（${rangeLabel(start, end)}）`);
+  return fileRes(c, bytes, rangeDocFilename(rows.length, start, end), DOCX_MIME);
+}
+
+async function handleZip(c: Ctx): Promise<Response> {  const q = (c.url.searchParams.get('q') || '').trim();
   const rows = await db.listAllRecruit(c.env.DB, q);
   if (!rows.length) {
     await flash(c, 'error', '没有可生成 Word 的招聘信息');
@@ -666,11 +694,14 @@ async function handleImportPost(c: Ctx, form: FormData): Promise<Response> {
 
 async function handleExport(c: Ctx): Promise<Response> {
   const q = (c.url.searchParams.get('q') || '').trim();
-  const rows = await db.listAllRecruit(c.env.DB, q);
+  // 日期留空 = 导出全部；只填一头也可以（起始 / 截至）
+  const { start, end } = dateRange(c.url.searchParams.get('start'), c.url.searchParams.get('end'));
+  const rows = await db.listAllRecruit(c.env.DB, q, start, end);
   const bytes = exportXlsx(rows);
-  await audit(c, '导出 Excel', `共 ${rows.length} 条${q ? `，关键词：${q}` : ''}`);
+  await audit(c, '导出 Excel',
+    `共 ${rows.length} 条（${rangeLabel(start, end)}${q ? `，关键词：${q}` : ''}）`);
   const today = nowLocal().slice(0, 10).replace(/-/g, '');
-  return fileRes(c, bytes, `招聘信息_${today}.xlsx`, XLSX_MIME);
+  return fileRes(c, bytes, rangeXlsxFilename(start, end, today), XLSX_MIME);
 }
 
 function handleTemplate(c: Ctx): Response {

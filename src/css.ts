@@ -468,6 +468,21 @@ form.inline button { font-family: inherit; }
   .data-table th:nth-child(8), .data-table td:nth-child(8) { display: none; }
 }
 
+/* ---- 按日期导出：日期条 ---- */
+.datebar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 14px; padding: 10px 14px;
+  background: #f7f9fd; border: 1px solid var(--line); border-radius: 10px;
+}
+.datebar-title { font-size: 13px; font-weight: 600; color: #3d4658; }
+.datebar-f { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.datebar-f input {
+  height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px;
+  background: #fff; font-family: inherit; font-size: 12.5px; color: var(--text); outline: none;
+}
+.datebar-f input:focus { border-color: #9db4dd; box-shadow: 0 0 0 3px rgba(47, 85, 151, .1); }
+.datebar-hint { font-size: 12px; color: var(--muted); }
+
 /* ---- 勾选导出：选择条 + 行内复选框 ---- */
 .selbar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;

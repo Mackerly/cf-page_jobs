@@ -149,7 +149,7 @@ export function indexPage(o: LayoutOpts & {
     <div class="notice">
       <span class="notice-ic">🔒</span>
       <div><b>当前为访客浏览模式。</b>招聘列表、打印预览与单条 Word 简章可自由使用；
-      新增 / 编辑 / 删除、导入 Excel、导出 Excel、批量生成 Word 需登录后操作。</div>
+      新增 / 编辑 / 删除、导入 Excel、导出 Excel、批量生成 Word、按日期导出需登录后操作。</div>
       <a class="btn btn-xs btn-primary" href="/login">登录</a>
     </div>` : '';
 
@@ -207,10 +207,19 @@ export function indexPage(o: LayoutOpts & {
     </form>
     <div class="tool-actions">
       <a class="btn btn-soft" href="/docx/zip${qs({ q: q || undefined })}">📦 批量生成 Word（ZIP）</a>
-      <a class="btn btn-soft" href="/export/excel${qs({ q: q || undefined })}">⬇ 导出 Excel</a>
       <a class="btn btn-soft" href="/import">⬆ 导入 Excel</a>
     </div>
   </div>
+
+  <form class="datebar" method="get" action="/export/excel">
+    ${q ? `<input type="hidden" name="q" value="${h(q)}">` : ''}
+    <span class="datebar-title">按日期导出</span>
+    <label class="datebar-f">起始 <input type="date" name="start" aria-label="起始日期"></label>
+    <label class="datebar-f">结束 <input type="date" name="end" aria-label="结束日期"></label>
+    <button class="btn btn-soft" type="submit">⬇ 导出 Excel</button>
+    <button class="btn btn-soft" type="submit" formaction="/docx/range">📄 导出 Word（每条一页）</button>
+    <span class="datebar-hint">日期留空 = 导出全部；Word 会把范围内每条各排一页，合并成一个文件</span>
+  </form>
   ${selbar}
   ${notice}
   ${rows.length ? `<div class="table-card"><table class="data-table">

@@ -7,7 +7,8 @@
 
 - 招聘信息增删改查、搜索分页（列表公开浏览）
 - 每条招聘信息生成 **单页 A4 Word 简章**（含底部二维码 + 「扫码关注，获取最新招聘信息」）
-- 批量生成 Word（ZIP）、**勾选多条导出到同一个 Word（每条一页）**、导入 Excel/CSV、导出 Excel、下载导入模板
+- 批量生成 Word（ZIP）、**勾选多条导出到同一个 Word（每条一页）**、**按起止日期导出 Word（每条一页）**、
+  导入 Excel/CSV、导出 Excel（默认全部，也可按起止日期筛选）、下载导入模板
 - 登录、注册申请 + 管理员审批、角色/状态管理、审计日志、强制改密、CSRF、限流
 - 首次部署用 `/setup?token=…` 创建第一个管理员
 
@@ -186,7 +187,7 @@ https://<你的项目名>.pages.dev/setup?token=<你填的 SETUP_TOKEN>
 填账号密码提交 → 自动跳到登录页。之后这个地址会永久返回 404（已初始化）。
 建好后建议把初始化口令删掉：控制台 → Settings → Variables and Secrets → 删除 `SETUP_TOKEN` → 重新部署。
 
-登录后即可使用：新增 / 导入 Excel / 导出 Excel / 批量生成 Word / 用户管理 / 操作日志。
+登录后即可使用：新增 / 导入 Excel / 导出 Excel / 批量生成 Word / 按日期导出 Word / 用户管理 / 操作日志。
 
 ### 之后的自动部署
 
@@ -305,7 +306,8 @@ Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态
 | GET/POST | `/add` `/edit/:id` | 登录 | 新增 / 修改 |
 | POST | `/delete/:id` | 登录 | 删除 |
 | GET/POST | `/import` | 登录 | 导入 Excel / CSV |
-| GET | `/export/excel` `/template.xlsx` `/docx/zip` | 登录 | 导出 Excel / 模板 / 批量 Word |
+| GET | `/export/excel` `/template.xlsx` `/docx/zip` | 登录 | 导出 Excel（可带 `start` / `end`）/ 模板 / 批量 Word |
+| GET | `/docx/range?start=&end=` | 登录 | 按起止日期导出，范围内每条一页合并成一个 Word |
 | POST | `/docx/selected` | 登录 | 勾选的多条合并为一个 Word（每条一页） |
 | GET | `/users` | 管理员 | 账号管理 |
 | POST | `/users/:id/action` | 管理员 | 审批/停用/启用/改角色/重置密码/删除 |

@@ -184,3 +184,57 @@ export function docFilename(info: DocInfo): string {
 export function multiDocFilename(count: number): string {
   return `招聘简章_选定${count}份_${nowLocal().slice(0, 10).replace(/-/g, '')}.docx`;
 }
+
+// --------------------------------------------------------------------------- //
+// 日期区间（导出筛选）
+// --------------------------------------------------------------------------- //
+/** 校验 YYYY-MM-DD，非法（含 2026-02-30 这种）返回空串 */
+export function normDate(raw: string | null | undefined): string {
+  const s = String(raw ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const valid = dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  return valid ? s : '';
+}
+
+/** 归一化起止日期：非法值忽略，start > end 时自动对调 */
+export function dateRange(
+  startRaw: string | null | undefined,
+  endRaw: string | null | undefined,
+): { start: string; end: string } {
+  let start = normDate(startRaw);
+  let end = normDate(endRaw);
+  if (start && end && start > end) {
+    const t = start; start = end; end = t;
+  }
+  return { start, end };
+}
+
+/** 区间描述：2026-10-01 ~ 2026-10-27 / 2026-10-01 起 / 截至 2026-10-27 / 全部 */
+export function rangeLabel(start: string, end: string): string {
+  if (start && end) return start === end ? start : `${start} ~ ${end}`;
+  if (start) return `${start} 起`;
+  if (end) return `截至 ${end}`;
+  return '全部';
+}
+
+/** 文件名里的日期段：20261001-20261027 / 20261001起 / 截至20261027 / 全部 */
+function rangeTag(start: string, end: string): string {
+  const c = (s: string) => s.replace(/-/g, '');
+  if (start && end) return start === end ? c(start) : `${c(start)}-${c(end)}`;
+  if (start) return `${c(start)}起`;
+  if (end) return `截至${c(end)}`;
+  return '全部';
+}
+
+/** 按日期导出 Word 的文件名，如 招聘简章_20261001-20261027_5份.docx */
+export function rangeDocFilename(count: number, start: string, end: string): string {
+  return `招聘简章_${rangeTag(start, end)}_${count}份.docx`;
+}
+
+/** 导出 Excel 的文件名：有日期段带日期段，否则用当天日期 */
+export function rangeXlsxFilename(start: string, end: string, today: string): string {
+  return start || end ? `招聘信息_${rangeTag(start, end)}.xlsx` : `招聘信息_${today}.xlsx`;
+}
+

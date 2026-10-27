@@ -40,6 +40,14 @@ class S:
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode("utf-8", "replace"), dict(e.headers)
 
+    def get_raw(self, path):
+        """下载二进制（Excel / Word / ZIP）用，不解码"""
+        try:
+            r = self.op.open(BASE + path)
+            return r.status, r.read(), dict(r.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), dict(e.headers)
+
     def post(self, path, data):
         body = urllib.parse.urlencode(data, doseq=True).encode()
         req = urllib.request.Request(BASE + path, data=body,
@@ -77,6 +85,20 @@ def flashes(body):
     return [m.strip() for m in re.findall(r'class="flash [a-z]+">([^<]*)', body)]
 
 
+def xlsx_rows(blob):
+    """数 sheet1 的数据行数（不含表头），不依赖 openpyxl"""
+    z = zipfile.ZipFile(io.BytesIO(blob))
+    xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8", "replace")
+    return max(0, xml.count("<row ") - 1)
+
+
+def docx_pages(blob):
+    """返回 (信息表数量, 分页符数量)：表数=条数，分页符=条数-1"""
+    z = zipfile.ZipFile(io.BytesIO(blob))
+    xml = z.read("word/document.xml").decode("utf-8", "replace")
+    return xml.count("<w:tbl>"), xml.count("<w:pageBreakBefore/>")
+
+
 print("=" * 62)
 adm = S()
 
@@ -89,7 +111,7 @@ print("[1] 匿名访问")
 for path in ("/", "/login", "/register", f"/docx/{RID}", "/qr.jpg", f"/preview/{RID}"):
     st, _, _ = S().get(path)
     check(f"公开可访问 {path}", st == 200, st)
-for path in ("/add", "/import", "/export/excel", "/docx/zip", "/docx/selected",
+for path in ("/add", "/import", "/export/excel", "/docx/zip", "/docx/range", "/docx/selected",
              "/template.xlsx", "/users", "/audit"):
     st, _, hd = S().get(path)
     check(f"匿名拦截 {path}", st == 302 and "/login" in hd.get("Location", ""), f"{st} {hd.get('Location')}")
@@ -207,6 +229,54 @@ check("未勾选被拦回列表", st == 302, st)
 st, _, _ = reg.post("/docx/selected", {"_csrf": sel_token, "ids": ["999999"]})
 check("无效 id 被拦回列表", st == 302, st)
 
+# ---------- 5.6 按日期导出（Excel / Word） ----------
+print("[5.6] 按日期导出（起止日期）")
+_, lst, _ = reg.get("/")
+check("列表出现日期导出条", 'class="datebar"' in lst)
+check("日期条含两个日期框", lst.count('type="date"') == 2, lst.count('type="date"'))
+
+TODAY = time.strftime("%Y-%m-%d")
+
+st, all_xlsx, _ = reg.get_raw("/export/excel")
+check("Excel 默认导出全部 200", st == 200 and all_xlsx[:2] == b"PK", st)
+ALL = xlsx_rows(all_xlsx)
+check("Excel 有数据行", ALL >= 3, ALL)
+
+st, all_docx, _ = reg.get_raw("/docx/range")
+check("Word 按日期导出 200", st == 200 and all_docx[:2] == b"PK", st)
+tables, breaks = docx_pages(all_docx)
+check("Word 条数与 Excel 一致", tables == ALL, (tables, ALL))
+check("Word 每条一页", breaks == max(0, ALL - 1), breaks)
+check("Word 内含二维码", zipfile.ZipFile(io.BytesIO(all_docx)).namelist().count("word/media/qr.jpeg") >= 1)
+
+st, today_xlsx, _ = reg.get_raw(f"/export/excel?start={TODAY}&end={TODAY}")
+check("Excel 今天区间 200", st == 200 and today_xlsx[:2] == b"PK", st)
+TD = xlsx_rows(today_xlsx)
+check("今天区间含刚新增的记录", 1 <= TD <= ALL, (TD, ALL))
+
+st, today_docx, hd = reg.get_raw(f"/docx/range?start={TODAY}&end={TODAY}")
+check("Word 今天区间条数与 Excel 一致", docx_pages(today_docx)[0] == TD, (docx_pages(today_docx)[0], TD))
+check("Word 文件名含日期段", TODAY.replace("-", "") in urllib.parse.unquote(hd.get("Content-Disposition", "")),
+      hd.get("Content-Disposition"))
+
+st, empty_xlsx, _ = reg.get_raw("/export/excel?start=2000-01-01&end=2000-01-02")
+check("Excel 空区间只剩表头", xlsx_rows(empty_xlsx) == 0, xlsx_rows(empty_xlsx))
+
+st, _, _ = reg.get_raw("/docx/range?start=2000-01-01&end=2000-01-02")
+check("Word 空区间跳回列表", st == 302, st)
+
+st, wide_docx, _ = reg.get_raw("/docx/range?start=2000-01-01&end=2099-12-31")
+check("Word 超大区间 = 全部", docx_pages(wide_docx)[0] == ALL, docx_pages(wide_docx)[0])
+
+st, bad_docx, _ = reg.get_raw("/docx/range?start=abc&end=2026-13-99")
+check("非法日期按全部处理", docx_pages(bad_docx)[0] == ALL, docx_pages(bad_docx)[0])
+
+st, rev_docx, _ = reg.get_raw(f"/docx/range?start={TODAY}&end=2000-01-01")
+check("起止颠倒自动对调", docx_pages(rev_docx)[0] == ALL, docx_pages(rev_docx)[0])
+
+st, open_docx, _ = reg.get_raw(f"/docx/range?start={TODAY}")
+check("只填起始 = 该天起", docx_pages(open_docx)[0] == TD, (docx_pages(open_docx)[0], TD))
+
 # ---------- 6. 停用 ----------
 print("[6] 停用即时失效")
 st, _, _ = adm.post(f"/users/{uid}/action",
@@ -238,7 +308,8 @@ print("[8] 删除")
 st, _, _ = reg.post(f"/delete/{rid}", {"_csrf": csrf(reg, "/"), "back": "/"})
 check("删除成功", st == 302, st)
 _, lst, _ = reg.get("/")
-check("已从列表移除", "Worker测试有限公司" not in lst)
+# 用记录 id 判断（库里可能残留上次中断测试的同名数据）
+check("已从列表移除", f'/edit/{rid}"' not in lst)
 
 # ---------- 9. 审计 ----------
 print("[9] 审计日志")

@@ -13,11 +13,20 @@ export interface Env {
 
 const LIKE_FIELDS = ['company_name', 'position', 'requirements', 'address', 'phone', 'salary'];
 
-function whereClause(keyword: string): { sql: string; args: string[] } {
+function whereClause(keyword: string, start = '', end = ''): { sql: string; args: string[] } {
+  const conds: string[] = [];
+  const args: string[] = [];
+
   const q = (keyword || '').trim();
-  if (!q) return { sql: '', args: [] };
-  const sql = ' WHERE ' + LIKE_FIELDS.map((f) => `${f} LIKE ?`).join(' OR ');
-  return { sql, args: LIKE_FIELDS.map(() => `%${q}%`) };
+  if (q) {
+    conds.push('(' + LIKE_FIELDS.map((f) => `${f} LIKE ?`).join(' OR ') + ')');
+    for (let i = 0; i < LIKE_FIELDS.length; i++) args.push(`%${q}%`);
+  }
+  // created_at 形如 2026-10-27 14:20:00，取前 10 位比较，纯日期或带时间都能命中
+  if (start) { conds.push('substr(created_at, 1, 10) >= ?'); args.push(start); }
+  if (end) { conds.push('substr(created_at, 1, 10) <= ?'); args.push(end); }
+
+  return { sql: conds.length ? ' WHERE ' + conds.join(' AND ') : '', args };
 }
 
 // --------------------------------------------------------------------------- //
@@ -38,8 +47,8 @@ export async function listRecruit(db: any, keyword = '', page = 1, perPage = 15)
   return res.results ?? [];
 }
 
-export async function listAllRecruit(db: any, keyword = '') {
-  const { sql, args } = whereClause(keyword);
+export async function listAllRecruit(db: any, keyword = '', start = '', end = '') {
+  const { sql, args } = whereClause(keyword, start, end);
   const res = await db.prepare(`SELECT * FROM recruit${sql} ORDER BY id ASC`).bind(...args).all();
   return res.results ?? [];
 }
