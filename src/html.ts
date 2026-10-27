@@ -395,7 +395,6 @@ export function loginPage(o: LayoutOpts & { nextUrl: string; username: string })
         <a class="btn btn-ghost" href="/">返回列表</a>
       </div>
       <p class="auth-tip">
-        首次部署请先访问 <span class="code">/setup?token=初始化口令</span> 创建管理员账号。
         连续输错 5 次将锁定 5 分钟。
         新注册的账号需管理员在「用户管理」中审批通过后才能登录。
       </p>
