@@ -87,7 +87,7 @@ export function layout(o: LayoutOpts, body: string): string {
   ${flashes}
   ${body}
 </main>
-<footer class="foot">${h(site)} · Cloudflare Pages + D1 · 每条招聘信息一键生成单页 A4 Word 简章</footer>
+<footer class="foot">${h(site)} · 每条招聘信息一键生成单页 A4 Word 简章</footer>
 </body>
 </html>`;
 }
