@@ -128,13 +128,13 @@ export function indexPage(o: LayoutOpts & {
         form="selForm" aria-label="选择编号 ${r.id}"> ` : ''}${r.id}</td>
       <td class="strong">${h(r.company_name)}</td>
       <td>${h(r.position)}</td>
-      <td class="mono center">${h(r.publish_date || '—')}</td>
       <td class="center">${h(r.headcount || '—')}</td>
       <td class="center salary">${h(r.salary || '面议')}</td>
       <td class="req">${r.requirements
         ? `<div class="req-text" title="${h(r.requirements)}">${h(r.requirements)}</div>` : '—'}</td>
       <td class="small">${h(r.address || '—')}</td>
       <td class="mono">${h(r.phone || '—')}</td>
+      <td class="mono center">${h(r.publish_date || '—')}</td>
       <td class="ops">
         <a class="btn btn-xs" href="/preview/${r.id}">预览</a>
         <a class="btn btn-xs btn-primary" href="/docx/${r.id}">Word</a>
@@ -270,10 +270,10 @@ export function indexPage(o: LayoutOpts & {
   ${rows.length ? `<div class="table-card"><table class="data-table">
     <thead><tr>
       <th style="width:74px">${user ? '<input type="checkbox" id="pickAll" class="pick-box" title="全选本页" aria-label="全选本页"> ' : ''}编号</th><th style="width:168px">用人单位名称</th>
-      <th style="width:124px">招聘岗位</th><th style="width:106px">发布日期</th><th style="width:58px">招聘数</th>
+      <th style="width:124px">招聘岗位</th><th style="width:58px">招聘数</th>
       <th style="width:110px">工资待遇（元）</th><th>岗位要求</th>
       <th style="width:118px">地址</th><th style="width:122px">联系电话</th>
-      <th style="width:248px">操作</th>
+      <th style="width:106px">发布日期</th><th style="width:248px">操作</th>
     </tr></thead>
     <tbody>${tableRows}</tbody>
   </table></div>${pager}` : empty}${pickScript}`;
@@ -552,16 +552,16 @@ export function formPage(o: LayoutOpts & {
     <div class="grid-2">
       ${input('company_name', '用人单位名称', '例如：星辰精密机械有限公司', 120, true)}
       ${input('position', '招聘岗位', '例如：数控车床操作工', 120, true)}
-      <label class="field">
-        <span class="label">发布日期 <small>（默认当天，可改）</small></span>
-        <input type="date" name="publish_date"
-               value="${h(o.rec.publish_date || todayIso())}" min="2000-01-01" max="2099-12-31">
-      </label>
       ${input('headcount', '招聘数（人）', '例如：6（也可填「若干」）', 40)}
       ${input('salary', '工资待遇（元）', '例如：6000-9000', 80)}
       ${input('address', '地址', '例如：经济技术开发区兴业路 88 号', 200)}
       ${input('phone', '联系电话', '例如：0571-88886666 / 13800001234', 80)}
     </div>
+    <label class="field">
+      <span class="label">发布日期 <small>（默认当天，可改）</small></span>
+      <input type="date" name="publish_date"
+             value="${h(o.rec.publish_date || todayIso())}" min="2000-01-01" max="2099-12-31">
+    </label>
     <label class="field">
       <span class="label">岗位要求 <small>（每行一条，Word 中将按行分段排版）</small></span>
       <textarea name="requirements" rows="10"

@@ -472,15 +472,15 @@ form.inline button { font-family: inherit; }
 
 @media (max-width: 1080px) {
   .grid-2-wide { grid-template-columns: 1fr; }
-  .data-table th:nth-child(8), .data-table td:nth-child(8) { display: none; }
+  .data-table th:nth-child(7), .data-table td:nth-child(7) { display: none; }
 }
 @media (max-width: 820px) {
   .grid-2 { grid-template-columns: 1fr; }
   .nav { display: none; }
   .main { padding: 18px 14px 40px; }
   .wrap { padding: 0 14px; }
-  .data-table th:nth-child(6), .data-table td:nth-child(6),
-  .data-table th:nth-child(9), .data-table td:nth-child(9) { display: none; }
+  .data-table th:nth-child(5), .data-table td:nth-child(5),
+  .data-table th:nth-child(8), .data-table td:nth-child(8) { display: none; }
 }
 
 /* ---- 按日期导出：日期条 ---- */
