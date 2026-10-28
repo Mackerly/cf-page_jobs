@@ -252,8 +252,11 @@ export function indexPage(o: LayoutOpts & {
     show_expired: '1',
     per: per === defaultPer ? undefined : per,
   })}`;
+  // 「发布满 1 个月自动失效」只在确实隐藏了失效记录时才提示
+  const expHint = hiddenParts.some((p) => p.indexOf('已失效') >= 0)
+    ? '（发布满 1 个月自动失效）' : '';
   const filterNote = hiddenParts.length
-    ? `<div class="filter-note">已隐藏 ${hiddenParts.join('、')}记录（发布满 1 个月自动失效），<a href="${allUrl}">全部显示</a></div>`
+    ? `<div class="filter-note">已隐藏 ${hiddenParts.join('、')}记录${expHint}，<a href="${allUrl}">全部显示</a></div>`
     : '';
 
   const body = `
