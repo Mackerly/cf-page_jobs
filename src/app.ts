@@ -19,7 +19,7 @@ import { exportXlsx, buildTemplate } from './xlsx';
 import { parseImport } from './xlsx-import';
 import { FIELD_NAMES, dateRange, docFilename, multiDocFilename, nowLocal, prepare,
   rangeDocFilename, rangeLabel, rangeXlsxFilename } from './format';
-import { buildWechatHtml } from './wechat';
+import { buildWechatVariants, WECHAT_THEMES } from './wechat';
 import { CSS } from './css';
 
 const PER_PAGE = 15;
@@ -28,7 +28,7 @@ const LOCK_WINDOW = 300;          // 秒
 const MAX_REG_PER_HOUR = 5;
 const MAX_SELECTED = 200;         // 单次「导出选定为 Word」最大条数
 const MAX_RANGE = 300;            // 单次「按日期导出 Word」最大条数
-const MAX_WECHAT = 30;            // 单次「导出微信发布」最大条数（一篇推文不宜过长）
+const MAX_WECHAT = 30;            // 单次「复制微信发布」最大条数（一篇推文不宜过长）
 const PER_CHOICES = [15, 30, 50, 100];   // 列表页可选的每页条数
 const DEFAULT_SITE_NAME = '招聘信息管理系统';   // SITE_NAME 未配置时的默认站名
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -643,12 +643,12 @@ async function handleWechatSelected(c: Ctx, form: FormData): Promise<Response> {
     return redirect(c, '/');
   }
 
-  const htmlCode = buildWechatHtml(rows.map((r: any) => prepare(r, true)));
-  await audit(c, '导出微信发布', `共 ${rows.length} 条（编号 ${rows.map((r: any) => r.id).join(',')}）`);
+  const variants = buildWechatVariants(rows.map((r: any) => prepare(r, true)));
+  await audit(c, '复制微信发布', `共 ${rows.length} 条（编号 ${rows.map((r: any) => r.id).join(',')}）`);
   const stamp = nowLocal().replace(/[-:]/g, '').replace(' ', '_').slice(0, 13);
   return htmlRes(c, pages.wechatPage({
     ...layoutOpts(c, '微信发布 · 招聘信息管理系统'),
-    htmlCode, count: rows.length,
+    variants, themes: WECHAT_THEMES, count: rows.length,
     downloadName: `招聘微信发布_${stamp}_${rows.length}条.html`,
   }));
 }

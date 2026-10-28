@@ -1,5 +1,5 @@
 /**
- * 微信发布 HTML 生成器
+ * 微信发布（复制到公众号）HTML 生成器
  * —— 与 Flask 版 wechat_gen.py 输出一致
  *
  * 微信编辑器会过滤 <style>、class 与外部资源，只保留行内样式，所以这里：
@@ -7,19 +7,42 @@
  *   * 只用 section + p 的块级排版，不用 flex / grid / position
  *   * 不引用任何图片：二维码等素材请在公众号编辑器里手动插入
  *
- * 生成结果是一段「片段」（不含 <html>/<body>），整段复制粘贴进编辑器即可。
+ * 生成结果是一段「片段」（不含 <html>/<body>），复制到剪贴板后粘贴进
+ * 公众号编辑器即可。内置 4 套预设配色，中性色四套共用。
  */
 import { DocInfo } from './format';
 
-const BRAND = '#c0392b';        // 主色：序号块、薪资、左侧竖条
-const BRAND_BG = '#fdf3f1';     // 主色浅底
-const BRAND_SOFT = '#a98079';   // 主色弱化文字（副标题、小标签）
+/** 一套配色只动 4 个色值 */
+export interface WechatTheme {
+  key: string;
+  name: string;
+  brand: string;   // 主色：序号块 / 薪资 / 左侧竖条 / 标题
+  bg: string;      // 主色浅底：头部条、薪资卡
+  soft: string;    // 主色弱化文字：副标题、小标签
+  line: string;    // 虚线分隔线
+}
+
+export const WECHAT_THEMES: WechatTheme[] = [
+  { key: 'red', name: '中国红', brand: '#c0392b', bg: '#fdf3f1', soft: '#a98079', line: '#e8dcd8' },
+  { key: 'blue', name: '深海蓝', brand: '#1d6fa5', bg: '#eff6fb', soft: '#6f8ea5', line: '#d7e3ee' },
+  { key: 'green', name: '松柏绿', brand: '#2f7d5d', bg: '#eef7f2', soft: '#6f9486', line: '#d5e6dd' },
+  { key: 'purple', name: '藏紫', brand: '#6b4a9b', bg: '#f5f1fb', soft: '#8a7ba3', line: '#e2daee' },
+];
+
+export const DEFAULT_WECHAT_THEME = 'red';
+
+export function themeOf(key?: string): WechatTheme {
+  return WECHAT_THEMES.find((t) => t.key === key) || WECHAT_THEMES[0];
+}
+
+// ---- 中性色（四套配色共用）----
 const TEXT = '#333333';
 const TEXT_SOFT = '#888888';
 const MUTED = '#999999';
+const TITLE = '#1f1f1f';
+const BODY = '#444444';
 const CARD_BG = '#fafafa';
 const NOTE_BG = '#f7f7f7';
-const LINE = '#e8dcd8';
 
 const FONT = "-apple-system,BlinkMacSystemFont,'Helvetica Neue','PingFang SC',"
   + "'Hiragino Sans GB','Microsoft YaHei',sans-serif";
@@ -49,14 +72,14 @@ function infoRow(label: string, value: string): string {
     + `<span style="color:${MUTED};">${esc(label)}：</span>${esc(value)}</p>`;
 }
 
-function recordBlock(idx: number, info: DocInfo): string {
+function recordBlock(idx: number, info: DocInfo, t: WechatTheme): string {
   const num = String(idx).padStart(2, '0');
   const out: string[] = [];
   out.push('  <section style="margin:0 0 24px;">');
 
   // 序号 + 岗位名
-  out.push(`    <p style="margin:0;font-size:17px;font-weight:bold;line-height:1.7;color:#1f1f1f;">`
-    + `<span style="display:inline-block;margin-right:8px;padding:1px 7px;background:${BRAND};`
+  out.push(`    <p style="margin:0;font-size:17px;font-weight:bold;line-height:1.7;color:${TITLE};">`
+    + `<span style="display:inline-block;margin-right:8px;padding:1px 7px;background:${t.brand};`
     + `color:#ffffff;border-radius:4px;font-size:13px;font-weight:normal;">${num}</span>`
     + `${esc(info.position)}</p>`);
   // 用人单位
@@ -64,10 +87,10 @@ function recordBlock(idx: number, info: DocInfo): string {
     + `${esc(info.company)}</p>`);
 
   // 薪资福利
-  out.push(`    <section style="margin:0 0 12px;padding:10px 12px;background:${BRAND_BG};`
-    + `border-left:3px solid ${BRAND};border-radius:0 6px 6px 0;">`);
-  out.push(`      <p style="margin:0;font-size:12px;color:${BRAND_SOFT};letter-spacing:1px;">薪资福利</p>`);
-  out.push(`      <p style="margin:4px 0 0;font-size:16px;font-weight:bold;color:${BRAND};">`
+  out.push(`    <section style="margin:0 0 12px;padding:10px 12px;background:${t.bg};`
+    + `border-left:3px solid ${t.brand};border-radius:0 6px 6px 0;">`);
+  out.push(`      <p style="margin:0;font-size:12px;color:${t.soft};letter-spacing:1px;">薪资福利</p>`);
+  out.push(`      <p style="margin:4px 0 0;font-size:16px;font-weight:bold;color:${t.brand};">`
     + `${esc(info.salary)}</p>`);
   out.push('    </section>');
 
@@ -84,9 +107,9 @@ function recordBlock(idx: number, info: DocInfo): string {
 
   // 具体信息（岗位要求，按行分段）
   out.push(`    <section style="margin:0;padding:12px 14px;background:${CARD_BG};border-radius:8px;">`);
-  out.push(`      <p style="margin:0 0 6px;font-size:12px;color:${BRAND_SOFT};letter-spacing:1px;">具体信息</p>`);
+  out.push(`      <p style="margin:0 0 6px;font-size:12px;color:${t.soft};letter-spacing:1px;">具体信息</p>`);
   for (const line of info.reqLines) {
-    out.push(`      <p style="margin:0 0 4px;font-size:14px;line-height:1.9;color:#444444;">`
+    out.push(`      <p style="margin:0 0 4px;font-size:14px;line-height:1.9;color:${BODY};">`
       + `${esc(line)}</p>`);
   }
   out.push('    </section>');
@@ -100,32 +123,34 @@ export interface WechatOpts {
   footer?: string;
   showDivider?: boolean;
   now?: Date;
+  theme?: string;
 }
 
-/** 把若干条招聘信息渲染成公众号可粘贴的 HTML 片段 */
+/** 把若干条招聘信息渲染成公众号可粘贴的 HTML 片段（指定配色） */
 export function buildWechatHtml(infos: DocInfo[], opts: WechatOpts = {}): string {
   if (!infos.length) return '';
   const title = opts.title || DEFAULT_WECHAT_TITLE;
   const footer = opts.footer === undefined ? DEFAULT_WECHAT_FOOTER : opts.footer;
   const showDivider = opts.showDivider !== false;
+  const t = themeOf(opts.theme);
 
   const out: string[] = [];
   out.push(`<section style="font-size:15px;line-height:1.75;color:${TEXT};font-family:${FONT};">`);
 
   // 头部
-  out.push(`  <section style="margin:0 0 20px;padding:16px 14px;background:${BRAND_BG};`
+  out.push(`  <section style="margin:0 0 20px;padding:16px 14px;background:${t.bg};`
     + 'border-radius:10px;text-align:center;">');
-  out.push(`    <p style="margin:0;font-size:19px;font-weight:bold;color:${BRAND};`
+  out.push(`    <p style="margin:0;font-size:19px;font-weight:bold;color:${t.brand};`
     + `letter-spacing:2px;">${esc(title)}</p>`);
-  out.push(`    <p style="margin:8px 0 0;font-size:12px;color:${BRAND_SOFT};">`
+  out.push(`    <p style="margin:8px 0 0;font-size:12px;color:${t.soft};">`
     + `共 ${infos.length} 个岗位 · ${fmtDate(opts.now || new Date())}</p>`);
   out.push('  </section>');
 
   infos.forEach((info, i) => {
     if (showDivider && i > 0) {
-      out.push(`  <section style="margin:0 0 24px;border-top:1px dashed ${LINE};"></section>`);
+      out.push(`  <section style="margin:0 0 24px;border-top:1px dashed ${t.line};"></section>`);
     }
-    out.push(recordBlock(i + 1, info));
+    out.push(recordBlock(i + 1, info, t));
   });
 
   // 底部提示
@@ -140,4 +165,15 @@ export function buildWechatHtml(infos: DocInfo[], opts: WechatOpts = {}): string
 
   out.push('</section>');
   return out.join('\n');
+}
+
+/** 一次渲染出全部预设配色：{ red: '<section…>', blue: …, green: …, purple: … } */
+export function buildWechatVariants(
+  infos: DocInfo[], opts: Omit<WechatOpts, 'theme'> = {},
+): Record<string, string> {
+  const variants: Record<string, string> = {};
+  for (const t of WECHAT_THEMES) {
+    variants[t.key] = buildWechatHtml(infos, { ...opts, theme: t.key });
+  }
+  return variants;
 }

@@ -348,8 +348,8 @@ for did in del_ids:
 _, lafter, _ = reg.get("/?q=%E5%88%86%E9%A1%B5%E6%B5%8B%E8%AF%95")
 check("测试数据已清理", "没有符合条件的招聘信息" in lafter)
 
-# ---------- 5.8 微信发布 HTML ----------
-print("[5.8] 导出微信发布 HTML")
+# ---------- 5.8 复制到公众号（微信排版） ----------
+print("[5.8] 复制到公众号（微信排版 + 4 套配色）")
 _, lst, _ = reg.get("/")
 check("选择条有微信发布按钮", "/wechat/selected" in lst and "微信发布" in lst)
 check("选择条有两个导出按钮", lst.count('class="btn btn-primary btn-xs sel-act"')
@@ -362,6 +362,14 @@ check("含源码框", 'id="wxCode"' in wx)
 check("含复制到公众号按钮", "复制到公众号" in wx)
 check("含复制源码按钮", "复制 HTML 源码" in wx)
 check("含下载按钮", "下载 .html" in wx)
+check("主按钮是复制到剪贴板", "复制到剪贴板" in wx)
+check("含 4 套预设配色", wx.count('class="wx-theme" data-theme=') == 4,
+      wx.count('class="wx-theme" data-theme='))
+check("四套配色名齐全", all(n in wx for n in ("中国红", "深海蓝", "松柏绿", "藏紫")))
+check("含自定义主色", 'id="wxCustom"' in wx)
+check("四套配色均已渲染", all(c in wx for c in ("#c0392b", "#1d6fa5", "#2f7d5d", "#6b4a9b")))
+check("配色数据已注入前端", "var VARIANTS = {" in wx and "var META = [" in wx)
+check("默认配色标记为选中", "paint(state.key, state.html)" in wx)
 check("提示图片需手动插入", "二维码" in wx)
 
 preview = wx.split('id="wxPreview"')[1].split('class="card wx-code-card"')[0]

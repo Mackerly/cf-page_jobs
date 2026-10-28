@@ -10,6 +10,14 @@ export function h(s: unknown): string {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+/** 安全地把 JSON 塞进 <script>：转义 <、>、&，避免提前闭合脚本 */
+function jsJson(v: unknown): string {
+  return JSON.stringify(v)
+    .replace(/</g, '\\u003c').replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+}
+
 function qs(params: Record<string, string | number | undefined>): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -179,8 +187,8 @@ export function indexPage(o: LayoutOpts & {
     <span class="selbar-count">已选 <b id="selCount">0</b> 条</span>
     <button class="btn btn-primary btn-xs sel-act" type="submit" disabled>📄 导出选定为 Word（单文件）</button>
     <button class="btn btn-soft btn-xs sel-act" type="submit" disabled
-            formaction="/wechat/selected">💬 导出微信发布 HTML</button>
-    <span class="selbar-hint">Word：每条一页合并成一个文件；微信：生成可直接粘贴到公众号编辑器的排版（每篇最多 ${o.maxWechat || 30} 条）</span>
+            formaction="/wechat/selected">📋 复制微信发布</button>
+    <span class="selbar-hint">Word：每条一页合并成一个文件；微信：生成公众号排版，一键复制到剪贴板（每篇最多 ${o.maxWechat || 30} 条）</span>
   </form>` : '';
 
   const pickScript = user ? `
@@ -276,49 +284,84 @@ export function indexPage(o: LayoutOpts & {
 // 微信发布（生成可粘贴到公众号的 HTML）
 // --------------------------------------------------------------------------- //
 export function wechatPage(o: LayoutOpts & {
-  htmlCode: string; count: number; downloadName: string;
+  variants: Record<string, string>;
+  themes: { key: string; name: string; brand: string; bg: string; soft: string; line: string }[];
+  count: number;
+  downloadName: string;
 }): string {
+  const first = o.themes[0];
+  const firstHtml = o.variants[first.key] || '';
+  const swatches = o.themes.map((t) =>
+    `<button type="button" class="wx-theme" data-theme="${h(t.key)}" style="--c:${h(t.brand)};--bg:${h(t.bg)};">`
+    + '<span class="wx-dot"></span>'
+    + `<span class="wx-theme-name">${h(t.name)}</span></button>`).join('');
+
   const body = `
   <div class="page-head">
     <div>
-      <h1>微信发布 HTML</h1>
-      <p class="sub">已生成 <b>${o.count}</b> 条招聘信息的公众号排版，可直接粘贴到公众号编辑器</p>
+      <h1>复制到公众号</h1>
+      <p class="sub">已生成 <b>${o.count}</b> 条招聘信息的公众号排版，选好配色后一键复制</p>
     </div>
     <div class="head-actions"><a class="btn" href="/">返回列表</a></div>
   </div>
 
   <div class="notice">
     <span class="notice-ic">💡</span>
-    <div><b>三种用法：</b>① 点「复制到公众号」，在公众号编辑器正文里 <b>Ctrl+V</b> 粘贴，排版会保留；
-    ② 点「复制 HTML 源码」，粘到需要源码的地方；③ 点「下载 .html」保存到本地，双击即可预览。
+    <div><b>三步搞定：</b>① 选一套配色；② 点「复制到剪贴板」；③ 打开公众号编辑器，在正文里 <b>Ctrl+V</b> 粘贴，排版与配色都会保留。
     <br>公众号不接受外部图片链接，二维码 / 图片请在编辑器里手动插入。</div>
   </div>
 
+  <div class="card wx-theme-card">
+    <div class="wx-theme-head">
+      <span class="wx-theme-title">配色</span>
+      <span class="wx-theme-sub">4 套预设，也可以自定义主色；复制时取当前配色</span>
+    </div>
+    <div class="wx-themes" id="wxThemes">
+      ${swatches}
+      <label class="wx-theme wx-theme-custom" id="wxCustomBox">
+        <input type="color" id="wxCustom" class="wx-color" value="${h(first.brand)}" title="自定义主色">
+        <span class="wx-theme-name">自定义</span>
+      </label>
+    </div>
+  </div>
+
   <div class="wx-tools">
-    <button class="btn btn-primary" id="btnRich" type="button">📋 复制到公众号</button>
+    <button class="btn btn-primary" id="btnCopy" type="button">📋 复制到剪贴板</button>
     <button class="btn btn-soft" id="btnCode" type="button">🧾 复制 HTML 源码</button>
-    <button class="btn btn-soft" id="btnDownload" type="button">⬇ 下载 .html</button>
-    <span class="wx-tip" id="wxTip">复制后到公众号编辑器正文里粘贴即可</span>
+    <button class="btn btn-ghost" id="btnDownload" type="button">⬇ 下载 .html</button>
+    <span class="wx-tip" id="wxTip">复制后到公众号编辑器正文里 Ctrl+V 粘贴</span>
   </div>
 
   <div class="card wx-card">
     <h3 class="card-title">效果预览（手机宽度）</h3>
     <div class="wx-preview" id="wxPreview">
-${o.htmlCode}
+${firstHtml}
     </div>
   </div>
 
   <details class="card wx-code-card">
-    <summary>查看 HTML 源码（${o.htmlCode.length} 字符）</summary>
-    <textarea id="wxCode" class="wx-code" readonly spellcheck="false">${h(o.htmlCode)}</textarea>
+    <summary>查看 HTML 源码（<span id="wxLen">${firstHtml.length}</span> 字符）</summary>
+    <textarea id="wxCode" class="wx-code" readonly spellcheck="false">${h(firstHtml)}</textarea>
   </details>
 
 <script>
 (function () {
-  var codeEl = document.getElementById('wxCode');
+  var VARIANTS = ${jsJson(o.variants)};
+  var META = ${jsJson(o.themes)};
+  var MAP = {};
+  META.forEach(function (m) { MAP[m.key] = m; });
+
   var preview = document.getElementById('wxPreview');
+  var codeEl = document.getElementById('wxCode');
+  var lenEl = document.getElementById('wxLen');
   var tip = document.getElementById('wxTip');
-  var NAME = ${JSON.stringify(o.downloadName)};
+  var customBox = document.getElementById('wxCustomBox');
+  var customInput = document.getElementById('wxCustom');
+  var buttons = [].slice.call(document.querySelectorAll('.wx-theme[data-theme]'));
+  var NAME = ${jsJson(o.downloadName)};
+  var KEY = 'wx_theme';
+
+  var state = { key: META[0].key, html: VARIANTS[META[0].key], base: META[0].key };
 
   function say(msg, ok) {
     tip.textContent = msg;
@@ -326,6 +369,90 @@ ${o.htmlCode}
     setTimeout(function () { tip.className = 'wx-tip'; }, 6000);
   }
 
+  function paint(key, html) {
+    state.key = key;
+    state.html = html;
+    preview.innerHTML = html;
+    codeEl.value = html;
+    lenEl.textContent = html.length;
+    buttons.forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-theme') === key);
+    });
+    customBox.classList.toggle('on', key === 'custom');
+  }
+
+  function remember(val) {
+    try { localStorage.setItem(KEY, val); } catch (e) { /* 隐私模式下忽略 */ }
+  }
+
+  /* ---- 自定义主色：把预设配色里的 4 个色值整体换掉 ---- */
+  function hex2rgb(x) {
+    x = String(x).replace('#', '');
+    if (x.length === 3) x = x[0] + x[0] + x[1] + x[1] + x[2] + x[2];
+    return [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2, 4), 16), parseInt(x.slice(4, 6), 16)];
+  }
+  function rgb2hex(rgb) {
+    return '#' + rgb.map(function (v) {
+      var s = Math.max(0, Math.min(255, Math.round(v))).toString(16);
+      return s.length < 2 ? '0' + s : s;
+    }).join('');
+  }
+  function mix(a, b, t) {
+    var x = hex2rgb(a), y = hex2rgb(b);
+    return rgb2hex([0, 1, 2].map(function (i) { return x[i] + (y[i] - x[i]) * t; }));
+  }
+  function luma(x) {
+    var c = hex2rgb(x);
+    return (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
+  }
+  function recolor(base, color) {
+    var m = MAP[base] || META[0];
+    var brand = String(color).toLowerCase();
+    if (luma(brand) > 0.72) brand = mix(brand, '#000000', 0.4);
+    var map = {};
+    map[m.brand.toLowerCase()] = brand;
+    map[m.bg.toLowerCase()] = mix(brand, '#ffffff', 0.92);
+    map[m.soft.toLowerCase()] = mix(brand, '#8a8a8a', 0.55);
+    map[m.line.toLowerCase()] = mix(brand, '#ffffff', 0.78);
+    var re = new RegExp(Object.keys(map).join('|'), 'g');
+    return VARIANTS[base].replace(re, function (t) { return map[t.toLowerCase()]; });
+  }
+
+  buttons.forEach(function (b) {
+    b.addEventListener('click', function () {
+      var key = b.getAttribute('data-theme');
+      state.base = key;
+      paint(key, VARIANTS[key]);
+      remember(key);
+    });
+  });
+
+  customInput.addEventListener('input', function () {
+    paint('custom', recolor(state.base, customInput.value));
+    remember('custom:' + customInput.value);
+  });
+
+  /* 记住上次选的配色 */
+  (function restore() {
+    var saved = null;
+    try { saved = localStorage.getItem(KEY); } catch (e) { saved = null; }
+    if (!saved) { return; }
+    if (VARIANTS[saved]) {
+      state.base = saved;
+      paint(saved, VARIANTS[saved]);
+    } else if (saved.indexOf('custom:') === 0) {
+      var color = saved.slice(7);
+      if (/^#[0-9a-f]{6}$/i.test(color)) {
+        customInput.value = color;
+        paint('custom', recolor(state.base, color));
+      }
+    }
+  })();
+
+  /* 首次进入：默认配色也要显示成「选中」 */
+  paint(state.key, state.html);
+
+  /* ---- 复制 ---- */
   function selectNode(node) {
     var range = document.createRange();
     range.selectNodeContents(node);
@@ -334,22 +461,27 @@ ${o.htmlCode}
     sel.addRange(range);
   }
 
-  document.getElementById('btnRich').addEventListener('click', function () {
-    var code = codeEl.value;
+  function legacyCopy() {
+    selectNode(preview);
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    say(ok ? '已复制，去公众号编辑器里 Ctrl+V 粘贴即可'
+           : '浏览器拦截了自动复制，已选中预览内容，请按 Ctrl+C', ok);
+  }
+
+  document.getElementById('btnCopy').addEventListener('click', function () {
+    var html = state.html;
+    if (!html) { return; }
     if (navigator.clipboard && window.ClipboardItem) {
       var item = new ClipboardItem({
-        'text/html': new Blob([code], { type: 'text/html' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
         'text/plain': new Blob([preview.innerText], { type: 'text/plain' })
       });
       navigator.clipboard.write([item]).then(function () {
-        say('已复制富文本，去公众号编辑器里 Ctrl+V 粘贴即可', true);
-      }).catch(function () {
-        selectNode(preview);
-        say('浏览器拦截了自动复制，已选中预览内容，请按 Ctrl+C', false);
-      });
+        say('已复制到剪贴板，去公众号编辑器里 Ctrl+V 粘贴即可', true);
+      }).catch(legacyCopy);
     } else {
-      selectNode(preview);
-      say('当前浏览器不支持自动复制，已选中预览内容，请按 Ctrl+C', false);
+      legacyCopy();
     }
   });
 
@@ -357,7 +489,7 @@ ${o.htmlCode}
     codeEl.select();
     codeEl.setSelectionRange(0, codeEl.value.length);
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(codeEl.value).then(function () {
+      navigator.clipboard.writeText(state.html).then(function () {
         say('HTML 源码已复制到剪贴板', true);
       }).catch(function () {
         document.execCommand('copy');
@@ -370,11 +502,11 @@ ${o.htmlCode}
   });
 
   document.getElementById('btnDownload').addEventListener('click', function () {
-    var doc = '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
-      + '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-      + '<title>微信发布</title>\n</head>\n'
-      + '<body style="margin:0;padding:20px 16px;background:#fff;">\n'
-      + codeEl.value + '\n</body>\n</html>\n';
+    var doc = '<!DOCTYPE html>\\n<html lang="zh-CN">\\n<head>\\n<meta charset="utf-8">\\n'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1">\\n'
+      + '<title>微信发布</title>\\n</head>\\n'
+      + '<body style="margin:0;padding:20px 16px;background:#fff;">\\n'
+      + state.html + '\\n</body>\\n</html>\\n';
     var blob = new Blob([doc], { type: 'text/html;charset=utf-8' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

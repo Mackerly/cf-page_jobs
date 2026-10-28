@@ -502,6 +502,34 @@ form.inline button { font-family: inherit; }
 .datebar-f select:focus { border-color: #9db4dd; box-shadow: 0 0 0 3px rgba(47, 85, 151, .1); }
 
 /* ---- 微信发布 ---- */
+.wx-theme-card { margin-bottom: 14px; padding: 14px 16px; }
+.wx-theme-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.wx-theme-title { font-size: 13.5px; font-weight: 600; color: #3d4658; }
+.wx-theme-sub { font-size: 12px; color: var(--muted); }
+.wx-themes { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wx-theme {
+  display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px 0 10px;
+  border: 1px solid var(--line); border-radius: 999px; background: #fff; color: #3d4658;
+  font-family: inherit; font-size: 13px; cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s, box-shadow .15s;
+}
+.wx-theme:hover { border-color: #c9d2e3; background: #fbfcfe; }
+.wx-theme.on {
+  border-color: var(--c, #2f5597); background: var(--bg, #eef3fc);
+  color: var(--c, #2f5597); font-weight: 600;
+  box-shadow: 0 0 0 3px rgba(47, 85, 151, .08);
+}
+.wx-dot {
+  width: 14px; height: 14px; border-radius: 50%; flex: none;
+  background: var(--c, #2f5597); box-shadow: 0 0 0 2px var(--bg, #eef3fc);
+}
+.wx-color {
+  width: 20px; height: 20px; padding: 0; border: 1px solid var(--line); border-radius: 50%;
+  background: none; cursor: pointer; flex: none;
+}
+.wx-color::-webkit-color-swatch-wrapper { padding: 0; }
+.wx-color::-webkit-color-swatch { border: none; border-radius: 50%; }
+.wx-color::-moz-color-swatch { border: none; border-radius: 50%; }
 .wx-tools {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   margin: 0 0 14px; padding: 10px 14px;
