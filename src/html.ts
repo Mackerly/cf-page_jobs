@@ -135,12 +135,14 @@ export function indexPage(o: LayoutOpts & {
   const statusHidden = `${showFull ? '<input type="hidden" name="show_full" value="1">' : ''}`
     + `${showExpired ? '<input type="hidden" name="show_expired" value="1">' : ''}`;
 
-  const tableRows = rows.map((r) => {
+  // 序号按当前页自然顺序生成（1、2、3…），与数据库 id 无关；勾选框仍用真实 id
+  const tableRows = rows.map((r, i) => {
     const st = String(r.eff_status || effStatus(r, today));
+    const seq = (page - 1) * per + i + 1;
     return `
     <tr class="${st === 'expired' ? 'row-expired' : st === 'full' ? 'row-full' : ''}">
       <td class="mono">${user ? `<input type="checkbox" class="pick-box" name="ids" value="${r.id}"
-        form="selForm" aria-label="选择编号 ${r.id}"> ` : ''}${r.id}</td>
+        data-id="${r.id}" form="selForm" aria-label="选择序号 ${seq}"> ` : ''}${seq}</td>
       <td class="strong">${h(r.company_name)}</td>
       <td>${h(r.position)}</td>
       <td class="center">${h(r.headcount || '—')}</td>
@@ -156,7 +158,7 @@ export function indexPage(o: LayoutOpts & {
         <a class="btn btn-xs btn-primary" href="/docx/${r.id}">Word</a>
         ${user ? `<a class="btn btn-xs" href="/edit/${r.id}">编辑</a>
         <form method="post" action="/delete/${r.id}" class="inline"
-              onsubmit="return confirm('确定删除编号 ${r.id}「${h(r.company_name)} - ${h(r.position)}」吗？此操作不可恢复。');">
+              onsubmit="return confirm('确定删除第 ${seq} 条「${h(r.company_name)} - ${h(r.position)}」吗？此操作不可恢复。');">
           <input type="hidden" name="_csrf" value="${h(o.csrf)}">
           <input type="hidden" name="back" value="${h(listUrl(page))}">
           <button class="btn btn-xs btn-danger" type="submit">删除</button>
@@ -310,7 +312,7 @@ export function indexPage(o: LayoutOpts & {
   ${notice}
   ${rows.length ? `<div class="table-card"><table class="data-table">
     <thead><tr>
-      <th style="width:72px">${user ? '<input type="checkbox" id="pickAll" class="pick-box" title="全选本页" aria-label="全选本页"> ' : ''}编号</th><th style="width:140px">用人单位名称</th>
+      <th style="width:72px">${user ? '<input type="checkbox" id="pickAll" class="pick-box" title="全选本页" aria-label="全选本页"> ' : ''}序号</th><th style="width:140px">用人单位名称</th>
       <th style="width:100px">招聘岗位</th><th style="width:52px">招聘数</th>
       <th style="width:110px">工资待遇（元）</th><th style="width:150px">岗位要求</th>
       <th style="width:94px">地址</th><th style="width:128px">联系电话</th>
@@ -598,18 +600,20 @@ export function formPage(o: LayoutOpts & {
       ${input('address', '地址', '例如：经济技术开发区兴业路 88 号', 200)}
       ${input('phone', '联系电话', '例如：0571-88886666 / 13800001234', 80)}
     </div>
-    <label class="field">
-      <span class="label">招聘状态 <small>（默认「招聘中」，发布满 1 个月自动失效）</small></span>
-      <select name="status">
-        ${STATUS_OPTIONS.map((s) => `<option value="${s.key}"${
+    <div class="grid-2">
+      <label class="field">
+        <span class="label">招聘状态 <small>（默认「招聘中」，发布满 1 个月自动失效）</small></span>
+        <select name="status">
+          ${STATUS_OPTIONS.map((s) => `<option value="${s.key}"${
     s.key === normStatus(o.rec.status) ? ' selected' : ''}>${s.label}</option>`).join('')}
-      </select>
-    </label>
-    <label class="field">
-      <span class="label">发布日期 <small>（默认当天，可改）</small></span>
-      <input type="date" name="publish_date"
-             value="${h(o.rec.publish_date || todayIso())}" min="2000-01-01" max="2099-12-31">
-    </label>
+        </select>
+      </label>
+      <label class="field">
+        <span class="label">发布日期 <small>（默认当天，可改）</small></span>
+        <input type="date" name="publish_date"
+               value="${h(o.rec.publish_date || todayIso())}" min="2000-01-01" max="2099-12-31">
+      </label>
+    </div>
     <label class="field">
       <span class="label">岗位要求 <small>（每行一条，Word 中将按行分段排版）</small></span>
       <textarea name="requirements" rows="10"

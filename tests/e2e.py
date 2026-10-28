@@ -48,6 +48,25 @@ class S:
         except urllib.error.HTTPError as e:
             return e.code, e.read(), dict(e.headers)
 
+    def post_file(self, path, field, filename, blob, extra=None):
+        """multipart/form-data 上传（导入 Excel 用）"""
+        bd = "----wbtest" + str(int(time.time() * 1000))
+        parts = []
+        for k, v in (extra or {}).items():
+            parts.append(f'--{bd}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode())
+        parts.append(
+            f'--{bd}\r\nContent-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'
+            "Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n".encode()
+            + blob + b"\r\n")
+        parts.append(f"--{bd}--\r\n".encode())
+        req = urllib.request.Request(BASE + path, data=b"".join(parts),
+                                     headers={"Content-Type": f"multipart/form-data; boundary={bd}"})
+        try:
+            r = self.op.open(req)
+            return r.status, r.read().decode("utf-8", "replace"), dict(r.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode("utf-8", "replace"), dict(e.headers)
+
     def post(self, path, data):
         body = urllib.parse.urlencode(data, doseq=True).encode()
         req = urllib.request.Request(BASE + path, data=body,
@@ -109,7 +128,8 @@ print("=" * 62)
 adm = S()
 
 # 取一条真实记录 id（重建数据库后 id 不一定从 1 开始）
-_first = re.search(r'<td class="mono">(?:<input[^>]*>\s*)?(\d+)</td>', S().get("/")[1])
+# 序号列已改成「每页自然顺序」，取真实 id 要读行内链接
+_first = re.search(r'href="/preview/(\d+)"', S().get("/")[1])
 RID = int(_first.group(1)) if _first else 1
 
 # ---------- 1. 匿名访问 ----------
@@ -194,7 +214,8 @@ check("新增成功", st == 302, st)
 _, lst, _ = reg.get("/")
 check("新增已入库", "Worker测试有限公司" in lst)
 
-m = re.search(r'<td class="mono">(?:<input[^>]*>\s*)?(\d+)</td>\s*<td class="strong">Worker测试有限公司', lst)
+_row = re.search(r'<tr[^>]*>\s*<td class="mono">.*?Worker测试有限公司.*?</tr>', lst, re.S)
+m = re.search(r'/preview/(\d+)', _row.group(0)) if _row else None
 rid = int(m.group(1)) if m else None
 check("拿到新记录 id", rid is not None, rid)
 
@@ -226,7 +247,7 @@ check("带发布日期新增成功", st == 302, st)
 _, lst, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95&show_expired=1")
 check("列表显示发布日期", "2026-09-01" in lst)
 check("列表有发布日期表头", "发布日期" in lst)
-drid = re.search(r'aria-label="选择编号 (\d+)"', lst)
+drid = re.search(r'data-id="(\d+)"', lst)
 drid = int(drid.group(1)) if drid else None
 check("拿到日期测试记录 id", drid is not None, drid)
 
@@ -253,7 +274,7 @@ check("非法发布日期被拦", st == 400, st)
 
 st, dx, _ = reg.get_raw("/export/excel?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95")
 check("Excel 含发布日期列", "发布日期" in xlsx_text(dx), xlsx_text(dx)[:120])
-for _x in set(re.findall(r'aria-label="选择编号 (\d+)"', lst2)):
+for _x in set(re.findall(r'data-id="(\d+)"', lst2)):
     reg.post(f"/delete/{_x}", {"_csrf": csrf(reg, "/"), "back": "/"})
 
 # ---------- 5.4b 招聘状态 ----------
@@ -323,6 +344,20 @@ _, editpage, _ = reg.get(f"/edit/{RID}")
 check("编辑页有状态下拉", 'name="status"' in editpage)
 check("编辑页默认选中在招", '<option value="active" selected' in editpage)
 
+# 新增页：招聘状态与发布日期同一行，默认「招聘中」+ 当天
+_, addpage, _ = reg.get("/add")
+same_row = re.search(
+    r'<div class="grid-2">(?:(?!</div>).)*name="status"(?:(?!</div>).)*name="publish_date"(?:(?!</div>).)*</div>',
+    addpage, re.S)
+check("状态与发布日期同一行", same_row is not None)
+check("新增页状态默认招聘中", '<option value="active" selected' in addpage)
+check("新增页日期默认当天", f'name="publish_date"\n               value="{TD1}"' in addpage
+      or f'value="{TD1}"' in addpage, TD1)
+check("状态在发布日期之前（同一行内）",
+      addpage.index('name="status"') < addpage.index('name="publish_date"'))
+check("发布日期仍在岗位要求之前",
+      addpage.index('name="publish_date"') < addpage.index('name="requirements"'))
+
 # 状态写进 Excel
 _, dx2, _ = reg.get_raw(f"/export/excel?q={Q}&show_full=1&show_expired=1")
 check("Excel 含招聘状态列", "招聘状态" in xlsx_text(dx2), xlsx_text(dx2)[:120])
@@ -330,7 +365,7 @@ check("Excel 含招聘状态列", "招聘状态" in xlsx_text(dx2), xlsx_text(dx
 # 清理本节数据
 for kw in ("状态", "排序"):
     _, pl, _ = reg.get(f"/?q={urllib.parse.quote(kw)}&show_full=1&show_expired=1&per=50")
-    for x in set(re.findall(r'aria-label="选择编号 (\d+)"', pl)):
+    for x in set(re.findall(r'data-id="(\d+)"', pl)):
         reg.post(f"/delete/{x}", {"_csrf": csrf(reg, "/"), "back": "/"})
 _, after, _ = reg.get(f"/?q={Q}&show_full=1&show_expired=1")
 check("状态测试数据已清理", "状态在招公司" not in after)
@@ -431,22 +466,31 @@ check("批量造数成功", len(made) == 16, len(made))
 
 p1, l1, _ = reg.get("/")
 check("第 1 页返回 200", p1 == 200, p1)
-ids1 = re.findall(r'aria-label="选择编号 (\d+)"', l1)
+ids1 = re.findall(r'data-id="(\d+)"', l1)
 check("默认每页 15 条", len(ids1) == 15, len(ids1))
+
+# 序号：按当前页自然顺序 1、2、3…，与数据库 id 无关
+SEQ_RE = r'<td class="mono">(?:<input[^>]*>\s*)?(\d+)</td>\s*<td class="strong">'
+seq1 = re.findall(SEQ_RE, l1)
+check("第 1 页序号 1..15", seq1 == [str(i) for i in range(1, 16)], seq1[:5])
+check("表头第一列是序号", "序号</th>" in l1 and "编号</th>" not in l1)
 check("页码按钮出现", 'class="pager-num' in l1)
 check("有下一页", "下一页" in l1)
 check("有末页", "末页" in l1)
 
 _, l2, _ = reg.get("/?page=2")
-ids2 = re.findall(r'aria-label="选择编号 (\d+)"', l2)
+ids2 = re.findall(r'data-id="(\d+)"', l2)
 check("第 2 页有数据", len(ids2) > 0, len(ids2))
+seq2 = re.findall(SEQ_RE, l2)
+check("第 2 页序号接着数（16 起）", seq2 and seq2[0] == "16", seq2[:3])
+check("序号与真实 id 不同源", seq1 and ids1 and seq1[0] != ids1[0], (seq1[0], ids1[0]))
 check("第 1、2 页不重复", not set(ids1) & set(ids2), (ids1[:3], ids2[:3]))
 
 _, l30, _ = reg.get("/?per=30")
 check("per=30 生效", "每页 30 条" in l30)
 check("per=30 保留在翻页链接", "per=30" in l30)
 check("per=30 下拉选中", 'value="30" selected' in l30)
-ids30 = re.findall(r'aria-label="选择编号 (\d+)"', l30)
+ids30 = re.findall(r'data-id="(\d+)"', l30)
 check("per=30 一页装下更多", len(ids30) >= len(ids1), (len(ids30), len(ids1)))
 
 _, l100, _ = reg.get("/?per=100")
@@ -458,12 +502,12 @@ check("非法 per 回退 15", "每页 15 条" in lbad, lbad[lbad.find("pager-inf
 # 关键词 + 每页条数组合
 _, lq, _ = reg.get("/?q=%E5%88%86%E9%A1%B5%E6%B5%8B%E8%AF%95&per=50")
 check("搜索保留 per=50", "per=50" in lq and "每页 50 条" in lq)
-check("搜索命中 16 条", len(re.findall(r'aria-label="选择编号 (\d+)"', lq)) == 16,
-      len(re.findall(r'aria-label="选择编号 (\d+)"', lq)))
+check("搜索命中 16 条", len(re.findall(r'data-id="(\d+)"', lq)) == 16,
+      len(re.findall(r'data-id="(\d+)"', lq)))
 
 # 列表按日期筛选
 _, ltoday, _ = reg.get(f"/?start={TODAY}&end={TODAY}")
-check("列表日期筛选生效", len(re.findall(r'aria-label="选择编号 (\d+)"', ltoday)) >= 1)
+check("列表日期筛选生效", len(re.findall(r'data-id="(\d+)"', ltoday)) >= 1)
 check("副标题显示日期", TODAY in ltoday)
 check("日期框回填", f'value="{TODAY}"' in ltoday)
 
@@ -472,7 +516,7 @@ check("空区间显示空状态", "没有符合条件的招聘信息" in lempty)
 
 # 清理：删掉刚造的 16 条
 _, lall, _ = reg.get("/?q=%E5%88%86%E9%A1%B5%E6%B5%8B%E8%AF%95&per=50")
-del_ids = re.findall(r'aria-label="选择编号 (\d+)"', lall)
+del_ids = re.findall(r'data-id="(\d+)"', lall)
 token_del = csrf(reg, "/")
 for did in del_ids:
     reg.post(f"/delete/{did}", {"_csrf": token_del, "back": "/"})
@@ -586,6 +630,47 @@ st, _, _ = adm.post(f"/users/{uid}/action", {"_csrf": csrf(adm, "/users"), "acti
 check("测试账号已清理", st == 302, st)
 _, users_left, _ = adm.get("/users")
 check("清理后列表不含测试账号", f">{uname}<" not in users_left)
+
+# ---------- 8.6 Excel 导入：招聘状态默认招聘中 ----------
+print("[8.6] Excel 导入（状态列容错）")
+from openpyxl import Workbook
+_wb = Workbook()
+_ws = _wb.active
+_ws.append(["用人单位名称", "招聘岗位", "招聘数（人）", "岗位要求", "工资待遇（元）",
+            "地址", "联系电话", "发布日期", "招聘状态"])
+_ws.append(["导入空状态公司", "岗位A", "1", "要求", "5000", "地址", "13000000001", TD1, ""])
+_ws.append(["导入招满公司", "岗位B", "2", "要求", "5000", "地址", "13000000002", TD1, "已招满"])
+_ws.append(["导入乱写公司", "岗位C", "3", "要求", "5000", "地址", "13000000003", TD1, "随便写"])
+_buf = io.BytesIO()
+_wb.save(_buf)
+
+st, imph, _ = adm.post_file("/import", "file", "t.xlsx", _buf.getvalue(),
+                            {"_csrf": csrf(adm, "/import")})
+check("导入请求成功", st == 200, st)
+check("导入成功 3 条", "导入完成" in imph and "成功 3 条" in imph,
+      imph[imph.find("导入完成"):imph.find("导入完成") + 40])
+
+_, ilist, _ = adm.get("/?q=" + urllib.parse.quote("导入") + "&show_full=1&show_expired=1&per=50")
+_rows = re.findall(r"<tr[^>]*>(.*?)</tr>", ilist, re.S)
+
+
+def _st_of(name):
+    for _r in _rows:
+        if name in _r:
+            _m = re.search(r'class="st st-\w+">([^<]+)<', _r)
+            return _m.group(1) if _m else None
+    return None
+
+
+check("导入留空 -> 招聘中", _st_of("导入空状态公司") == "招聘中", _st_of("导入空状态公司"))
+check("导入已招满 -> 已招满", _st_of("导入招满公司") == "已招满", _st_of("导入招满公司"))
+check("导入乱写 -> 招聘中", _st_of("导入乱写公司") == "招聘中", _st_of("导入乱写公司"))
+
+# 清理
+for _x in set(re.findall(r'data-id="(\d+)"', ilist)):
+    adm.post(f"/delete/{_x}", {"_csrf": csrf(adm, "/"), "back": "/"})
+_, iclean, _ = adm.get("/?q=" + urllib.parse.quote("导入") + "&show_full=1&show_expired=1")
+check("导入测试数据已清理", "导入空状态公司" not in iclean)
 
 # ---------- 9. 审计 ----------
 print("[9] 审计日志")
