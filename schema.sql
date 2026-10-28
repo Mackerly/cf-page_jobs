@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS recruit (
     salary       TEXT DEFAULT '',
     address      TEXT DEFAULT '',
     phone        TEXT DEFAULT '',
+    publish_date TEXT DEFAULT '',          -- 发布日期 YYYY-MM-DD（表单默认当天，筛选也用它）
     created_at   TEXT DEFAULT '',
     updated_at   TEXT DEFAULT ''
 );
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS login_fail (
 );
 
 CREATE INDEX IF NOT EXISTS idx_recruit_created ON recruit(id DESC);
+CREATE INDEX IF NOT EXISTS idx_recruit_publish ON recruit(publish_date);
 CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(id DESC);
 CREATE INDEX IF NOT EXISTS idx_login_fail ON login_fail(ip, username, ts);

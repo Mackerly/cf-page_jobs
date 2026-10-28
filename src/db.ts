@@ -1,7 +1,7 @@
 /**
  * D1 数据访问层
  */
-import { FIELD_NAMES, nowLocal } from './format';
+import { FIELD_NAMES, nowLocal, todayIso } from './format';
 
 export interface Env {
   DB: any;                       // D1Database
@@ -22,9 +22,9 @@ function whereClause(keyword: string, start = '', end = ''): { sql: string; args
     conds.push('(' + LIKE_FIELDS.map((f) => `${f} LIKE ?`).join(' OR ') + ')');
     for (let i = 0; i < LIKE_FIELDS.length; i++) args.push(`%${q}%`);
   }
-  // created_at 形如 2026-10-27 14:20:00，取前 10 位比较，纯日期或带时间都能命中
-  if (start) { conds.push('substr(created_at, 1, 10) >= ?'); args.push(start); }
-  if (end) { conds.push('substr(created_at, 1, 10) <= ?'); args.push(end); }
+  // 按「发布日期」筛选（YYYY-MM-DD，取前 10 位兼容带时间的旧数据）
+  if (start) { conds.push('substr(publish_date, 1, 10) >= ?'); args.push(start); }
+  if (end) { conds.push('substr(publish_date, 1, 10) <= ?'); args.push(end); }
 
   return { sql: conds.length ? ' WHERE ' + conds.join(' AND ') : '', args };
 }
@@ -73,19 +73,19 @@ export async function getRecruitsByIds(db: any, ids: number[]) {
 
 export async function insertRecruit(db: any, data: Record<string, string>): Promise<number> {
   const ts = nowLocal();
+  const cols = [...FIELD_NAMES, 'created_at', 'updated_at'];
   const res = await db.prepare(
-    `INSERT INTO recruit (company_name, position, headcount, requirements, salary, address, phone,
-      created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
-  ).bind(...FIELD_NAMES.map((k) => data[k] ?? ''), ts, ts).run();
+    `INSERT INTO recruit (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(',')})`,
+  ).bind(...FIELD_NAMES.map((k) => data[k] || (k === 'publish_date' ? todayIso() : '')), ts, ts).run();
   return Number(res.meta?.last_row_id ?? 0);
 }
 
 export async function insertManyRecruit(db: any, rows: Record<string, string>[]): Promise<number> {
   const ts = nowLocal();
+  const cols = [...FIELD_NAMES, 'created_at', 'updated_at'];
   const stmts = rows.map((r) => db.prepare(
-    `INSERT INTO recruit (company_name, position, headcount, requirements, salary, address, phone,
-      created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
-  ).bind(...FIELD_NAMES.map((k) => r[k] ?? ''), ts, ts));
+    `INSERT INTO recruit (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(',')})`,
+  ).bind(...FIELD_NAMES.map((k) => r[k] || (k === 'publish_date' ? todayIso() : '')), ts, ts));
   for (let i = 0; i < stmts.length; i += 50) {
     await db.batch(stmts.slice(i, i + 50));
   }
@@ -94,9 +94,9 @@ export async function insertManyRecruit(db: any, rows: Record<string, string>[])
 
 export async function updateRecruit(db: any, id: number, data: Record<string, string>) {
   await db.prepare(
-    `UPDATE recruit SET company_name=?, position=?, headcount=?, requirements=?, salary=?,
-      address=?, phone=?, updated_at=? WHERE id=?`,
-  ).bind(...FIELD_NAMES.map((k) => data[k] ?? ''), nowLocal(), id).run();
+    `UPDATE recruit SET ${FIELD_NAMES.map((k) => `${k}=?`).join(', ')}, updated_at=? WHERE id=?`,
+  ).bind(...FIELD_NAMES.map((k) => data[k] || (k === 'publish_date' ? todayIso() : '')),
+    nowLocal(), id).run();
 }
 
 export async function deleteRecruit(db: any, id: number) {

@@ -18,6 +18,7 @@ export const FIELDS: FieldDef[] = [
   { key: 'salary', label: '工资待遇（元）', required: false, type: 'text' },
   { key: 'address', label: '地址', required: false, type: 'text' },
   { key: 'phone', label: '联系电话', required: false, type: 'text' },
+  { key: 'publish_date', label: '发布日期', required: false, type: 'text' },
 ];
 
 export const FIELD_NAMES = FIELDS.map((f) => f.key);
@@ -39,6 +40,8 @@ export const ALIASES: Record<string, string[]> = {
   address: ['地址', '工作地址', '单位地址', '工作地点', '上班地址', '公司地址', 'address', 'location'],
   phone: ['联系电话', '电话', '联系方式', '手机', '手机号', '联系人电话',
     'phone', 'tel', 'telephone', 'mobile'],
+  publish_date: ['发布日期', '发布时间', '发布日', '日期',
+    'publishdate', 'publish_date', 'date'],
 };
 
 // --------------------------------------------------------------------------- //
@@ -72,6 +75,35 @@ export function nowLocal(d: Date = new Date()): string {
   }).formatToParts(d);
   const g = (t: string) => p.find((x) => x.type === t)?.value ?? '00';
   return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}:${g('second')}`;
+}
+
+/** 当天日期 YYYY-MM-DD（Asia/Shanghai），发布日期默认值 */
+export function todayIso(d: Date = new Date()): string {
+  const t = todayLocal(d);
+  return `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
+}
+
+/**
+ * 各种写法的日期 -> YYYY-MM-DD；无法识别返回空串。
+ * 兼容 2026/10/28、2026年10月28日、20261028，以及 Excel 日期序列号（如 46320）。
+ */
+export function toIsoDate(raw: unknown): string {
+  if (raw === null || raw === undefined) return '';
+  let s = String(raw).trim();
+  if (!s) return '';
+  if (/^\d{4,5}(\.\d+)?$/.test(s)) {
+    const serial = Number(s);
+    if (serial > 20000 && serial < 80000) {
+      const dt = new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000);
+      s = dt.toISOString().slice(0, 10);
+    }
+  }
+  const m = /^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/.exec(s);
+  if (!m) return '';
+  const y = Number(m[1]); const mo = Number(m[2]); const d = Number(m[3]);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return '';
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
 export function todayLocal(d: Date = new Date()): { year: number; month: number; day: number } {

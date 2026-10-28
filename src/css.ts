@@ -168,9 +168,10 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  overflow: hidden;
+  overflow-x: auto;          /* 列多了窄屏可横向滚动，不挤压「岗位要求」 */
+  overflow-y: hidden;
 }
-.data-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.data-table { width: 100%; min-width: 1100px; border-collapse: collapse; table-layout: fixed; }
 .data-table th {
   background: #f8fafd;
   border-bottom: 1px solid var(--line);
@@ -193,7 +194,7 @@ a:hover { text-decoration: underline; }
 .data-table tbody tr:last-child td { border-bottom: none; }
 .data-table tbody tr:hover { background: #fafbfe; }
 .data-table .center { text-align: center; }
-.data-table .mono { font-family: ui-monospace, Consolas, "Courier New", monospace; color: #566; font-size: 13px; }
+.data-table .mono { font-family: ui-monospace, Consolas, "Courier New", monospace; color: #566; font-size: 13px; white-space: nowrap; }
 .data-table .strong { font-weight: 600; }
 .data-table .small { font-size: 12.5px; color: #5b6472; }
 .data-table .salary { color: #c0392b; font-weight: 600; }
@@ -259,6 +260,7 @@ form.inline button { font-family: inherit; }
 
 .field input[type="text"],
 .field input[type="password"],
+.field input[type="date"],
 .field textarea {
   width: 100%;
   padding: 9px 12px;
@@ -272,7 +274,9 @@ form.inline button { font-family: inherit; }
   transition: .15s;
 }
 .field textarea { resize: vertical; line-height: 1.7; }
+.field input[type="date"] { cursor: pointer; }
 .field input[type="text"]:focus,
+.field input[type="date"]:focus,
 .field input[type="password"]:focus,
 .field textarea:focus {
   border-color: #9db4dd;
@@ -468,15 +472,15 @@ form.inline button { font-family: inherit; }
 
 @media (max-width: 1080px) {
   .grid-2-wide { grid-template-columns: 1fr; }
-  .data-table th:nth-child(7), .data-table td:nth-child(7) { display: none; }
+  .data-table th:nth-child(8), .data-table td:nth-child(8) { display: none; }
 }
 @media (max-width: 820px) {
   .grid-2 { grid-template-columns: 1fr; }
   .nav { display: none; }
   .main { padding: 18px 14px 40px; }
   .wrap { padding: 0 14px; }
-  .data-table th:nth-child(5), .data-table td:nth-child(5),
-  .data-table th:nth-child(8), .data-table td:nth-child(8) { display: none; }
+  .data-table th:nth-child(6), .data-table td:nth-child(6),
+  .data-table th:nth-child(9), .data-table td:nth-child(9) { display: none; }
 }
 
 /* ---- 按日期导出：日期条 ---- */

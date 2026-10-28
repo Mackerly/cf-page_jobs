@@ -11,7 +11,9 @@
     "db:init:local": "wrangler d1 execute recruit --local --persist-to .wrangler/state --file=./schema.sql",
     "db:seed:local": "wrangler d1 execute recruit --local --persist-to .wrangler/state --file=./seed.sql",
     "deploy": "wrangler pages deploy public --project-name recruit-pages",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:migrate:publish": "wrangler d1 execute recruit --remote --file=./migrations/001_publish_date.sql",
+    "db:migrate:publish:local": "wrangler d1 execute recruit --local --persist-to .wrangler/state --file=./migrations/001_publish_date.sql"
   },
   "dependencies": {
     "fflate": "^0.8.2"

@@ -2,7 +2,7 @@
  * 服务端渲染的 HTML 页面（模板字符串，无模板引擎依赖）
  */
 import { CSS } from './css';
-import { DocInfo, FIELD_LABELS, FIELDS, QR_CAPTION } from './format';
+import { DocInfo, FIELD_LABELS, FIELDS, QR_CAPTION, todayIso } from './format';
 
 export function h(s: unknown): string {
   return String(s ?? '')
@@ -128,6 +128,7 @@ export function indexPage(o: LayoutOpts & {
         form="selForm" aria-label="选择编号 ${r.id}"> ` : ''}${r.id}</td>
       <td class="strong">${h(r.company_name)}</td>
       <td>${h(r.position)}</td>
+      <td class="mono center">${h(r.publish_date || '—')}</td>
       <td class="center">${h(r.headcount || '—')}</td>
       <td class="center salary">${h(r.salary || '面议')}</td>
       <td class="req">${r.requirements
@@ -251,9 +252,9 @@ export function indexPage(o: LayoutOpts & {
 
   <form class="datebar" method="get" action="/">
     ${q ? `<input type="hidden" name="q" value="${h(q)}">` : ''}
-    <span class="datebar-title">筛选 / 导出</span>
-    <label class="datebar-f">起始 <input type="date" name="start" value="${h(start)}" aria-label="起始日期"></label>
-    <label class="datebar-f">结束 <input type="date" name="end" value="${h(end)}" aria-label="结束日期"></label>
+    <span class="datebar-title">按发布日期筛选 / 导出</span>
+    <label class="datebar-f">起始 <input type="date" name="start" value="${h(start)}" aria-label="发布日期起"></label>
+    <label class="datebar-f">结束 <input type="date" name="end" value="${h(end)}" aria-label="发布日期止"></label>
     <label class="datebar-f">每页
       <select name="per" id="perSel" aria-label="每页条数">
         ${o.perChoices.map((n) => `<option value="${n}"${n === per ? ' selected' : ''}>${n} 条</option>`).join('')}
@@ -262,17 +263,17 @@ export function indexPage(o: LayoutOpts & {
     <button class="btn btn-soft" type="submit">🔍 筛选</button>
     <button class="btn btn-soft" type="submit" formaction="/export/excel">⬇ 导出 Excel</button>
     <button class="btn btn-soft" type="submit" formaction="/docx/range">📄 导出 Word（每条一页）</button>
-    <span class="datebar-hint">日期留空 = 全部；筛选同时作用于列表与导出</span>
+    <span class="datebar-hint">日期按「发布日期」比较，留空 = 全部；筛选同时作用于列表与导出</span>
   </form>
   ${selbar}
   ${notice}
   ${rows.length ? `<div class="table-card"><table class="data-table">
     <thead><tr>
-      <th style="width:76px">${user ? '<input type="checkbox" id="pickAll" class="pick-box" title="全选本页" aria-label="全选本页"> ' : ''}编号</th><th style="width:180px">用人单位名称</th>
-      <th style="width:140px">招聘岗位</th><th style="width:78px">招聘数</th>
+      <th style="width:74px">${user ? '<input type="checkbox" id="pickAll" class="pick-box" title="全选本页" aria-label="全选本页"> ' : ''}编号</th><th style="width:168px">用人单位名称</th>
+      <th style="width:124px">招聘岗位</th><th style="width:106px">发布日期</th><th style="width:58px">招聘数</th>
       <th style="width:110px">工资待遇（元）</th><th>岗位要求</th>
-      <th style="width:150px">地址</th><th style="width:120px">联系电话</th>
-      <th style="width:268px">操作</th>
+      <th style="width:118px">地址</th><th style="width:122px">联系电话</th>
+      <th style="width:248px">操作</th>
     </tr></thead>
     <tbody>${tableRows}</tbody>
   </table></div>${pager}` : empty}${pickScript}`;
@@ -551,6 +552,11 @@ export function formPage(o: LayoutOpts & {
     <div class="grid-2">
       ${input('company_name', '用人单位名称', '例如：星辰精密机械有限公司', 120, true)}
       ${input('position', '招聘岗位', '例如：数控车床操作工', 120, true)}
+      <label class="field">
+        <span class="label">发布日期 <small>（默认当天，可改）</small></span>
+        <input type="date" name="publish_date"
+               value="${h(o.rec.publish_date || todayIso())}" min="2000-01-01" max="2099-12-31">
+      </label>
       ${input('headcount', '招聘数（人）', '例如：6（也可填「若干」）', 40)}
       ${input('salary', '工资待遇（元）', '例如：6000-9000', 80)}
       ${input('address', '地址', '例如：经济技术开发区兴业路 88 号', 200)}
@@ -895,7 +901,7 @@ export function usersPage(o: LayoutOpts & { rows: any[] }): string {
   <div class="table-card"><table class="data-table">
     <thead><tr>
       <th style="width:56px">编号</th><th style="width:150px">账号</th><th style="width:110px">姓名</th>
-      <th style="width:130px">联系电话</th><th style="width:100px">角色</th><th style="width:100px">状态</th>
+      <th style="width:130px">联系电话</th><th style="width:110px">角色</th><th style="width:110px">状态</th>
       <th style="width:160px">最近登录</th><th style="width:180px">审批信息</th><th style="width:300px">操作</th>
     </tr></thead>
     <tbody>${rowHtml}</tbody>

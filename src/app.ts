@@ -18,7 +18,7 @@ import { buildDocx, buildDocxMulti, qrBytes } from './docx';
 import { exportXlsx, buildTemplate } from './xlsx';
 import { parseImport } from './xlsx-import';
 import { FIELD_NAMES, dateRange, docFilename, multiDocFilename, nowLocal, prepare,
-  rangeDocFilename, rangeLabel, rangeXlsxFilename } from './format';
+  rangeDocFilename, rangeLabel, rangeXlsxFilename, todayIso, toIsoDate } from './format';
 import { buildWechatVariants, WECHAT_THEMES } from './wechat';
 import { CSS } from './css';
 
@@ -509,17 +509,35 @@ async function handleRegisterPost(c: Ctx, form: FormData): Promise<Response> {
 function formDataToRecord(form: FormData): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of FIELD_NAMES) out[k] = String(form.get(k) ?? '').trim();
+  // 发布日期留空 = 当天；格式不对留给调用方报错
+  out.publish_date = out.publish_date || todayIso();
   return out;
+}
+
+/** 校验并规范化发布日期，返回错误信息（空串 = 通过） */
+function fixPublishDate(data: Record<string, string>): string {
+  const fixed = toIsoDate(data.publish_date);
+  if (!fixed) return '发布日期格式不正确，请重新选择';
+  data.publish_date = fixed;
+  return '';
 }
 
 function handleAddGet(c: Ctx): Response {
   const rec: Record<string, string> = {};
   for (const k of FIELD_NAMES) rec[k] = '';
+  rec.publish_date = todayIso();
   return htmlRes(c, pages.formPage({ ...layoutOpts(c, '新增招聘信息', 'add'), mode: 'add', rec }));
 }
 
 async function handleAddPost(c: Ctx, form: FormData): Promise<Response> {
   const data = formDataToRecord(form);
+  const dateErr = fixPublishDate(data);
+  if (dateErr) {
+    await flash(c, 'error', dateErr);
+    return htmlRes(c, pages.formPage({
+      ...layoutOpts(c, '新增招聘信息', 'add'), mode: 'add', rec: data,
+    }), 400);
+  }
   if (!data.company_name || !data.position) {
     await flash(c, 'error', '用人单位名称、招聘岗位为必填项');
     return htmlRes(c, pages.formPage({
@@ -545,6 +563,13 @@ async function handleEditPost(c: Ctx, form: FormData, id: number): Promise<Respo
   const rec = await db.getRecruit(c.env.DB, id);
   if (!rec) return notFound(c);
   const data = formDataToRecord(form);
+  const dateErr = fixPublishDate(data);
+  if (dateErr) {
+    await flash(c, 'error', dateErr);
+    return htmlRes(c, pages.formPage({
+      ...layoutOpts(c, '编辑招聘信息', 'add'), mode: 'edit', rec: data, rid: id,
+    }), 400);
+  }
   if (!data.company_name || !data.position) {
     await flash(c, 'error', '用人单位名称、招聘岗位为必填项');
     return htmlRes(c, pages.formPage({

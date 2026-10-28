@@ -3,7 +3,7 @@
  * 支持 .xlsx / .xlsm / .csv，表头名称容错（别名映射），逐行校验并返回行号错误
  */
 import { unzipSync, strFromU8 } from 'fflate';
-import { ALIASES, FIELD_LABELS, FIELD_NAMES } from './format';
+import { ALIASES, FIELD_LABELS, FIELD_NAMES, toIsoDate, todayIso } from './format';
 
 export interface ParseResult {
   valid: Record<string, string>[];
@@ -256,6 +256,16 @@ export function parseImport(filename: string, bytes: Uint8Array): ParseResult {
     if (!item.company_name || !item.position) {
       errors.push(`第 ${offset} 行：用人单位名称或招聘岗位为空，已跳过`);
       continue;
+    }
+    if (item.publish_date) {
+      const fixed = toIsoDate(item.publish_date);
+      if (!fixed) {
+        errors.push(`第 ${offset} 行：发布日期「${item.publish_date}」无法识别（示例：2026-10-28），已跳过`);
+        continue;
+      }
+      item.publish_date = fixed;
+    } else {
+      item.publish_date = todayIso();
     }
     valid.push(item);
   }

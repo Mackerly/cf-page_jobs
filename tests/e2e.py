@@ -92,6 +92,12 @@ def xlsx_rows(blob):
     return max(0, xml.count("<row ") - 1)
 
 
+def xlsx_text(blob):
+    """sheet1 的 XML 文本（用来查表头 / 单元格内容）"""
+    z = zipfile.ZipFile(io.BytesIO(blob))
+    return z.read("xl/worksheets/sheet1.xml").decode("utf-8", "replace")
+
+
 def docx_pages(blob):
     """返回 (信息表数量, 分页符数量)：表数=条数，分页符=条数-1"""
     z = zipfile.ZipFile(io.BytesIO(blob))
@@ -204,6 +210,51 @@ check("修改已生效", "质检员（改）" in lst)
 # 编辑页 GET
 check("编辑页可打开", reg.get(f"/edit/{rid}")[0] == 200)
 
+# ---------- 5.4 发布日期 ----------
+print("[5.4] 发布日期（默认当天 + 按发布日期筛选）")
+TD0 = time.strftime("%Y-%m-%d")
+_, addpage, _ = reg.get("/add")
+check("新增页有发布日期输入", 'name="publish_date"' in addpage and 'type="date"' in addpage)
+check("发布日期默认当天", f'value="{TD0}"' in addpage, TD0)
+
+st, _, _ = reg.post("/add", {
+    "_csrf": csrf(reg, "/add"), "company_name": "日期测试公司", "position": "日期岗位",
+    "publish_date": "2026-09-01", "headcount": "1", "salary": "面议",
+    "address": "测试路 9 号", "phone": "13500009999", "requirements": "测试",
+})
+check("带发布日期新增成功", st == 302, st)
+_, lst, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95")
+check("列表显示发布日期", "2026-09-01" in lst)
+check("列表有发布日期表头", "发布日期" in lst)
+drid = re.search(r'aria-label="选择编号 (\d+)"', lst)
+drid = int(drid.group(1)) if drid else None
+check("拿到日期测试记录 id", drid is not None, drid)
+
+_, hit, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95&start=2026-09-01&end=2026-09-01")
+check("按发布日期命中", "日期测试公司" in hit)
+_, miss, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95&start=2026-09-02")
+check("区间外不命中", "日期测试公司" not in miss)
+_, miss2, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95&end=2026-08-31")
+check("结束日之前不命中", "日期测试公司" not in miss2)
+
+st, _, _ = reg.post(f"/edit/{drid}", {
+    "_csrf": csrf(reg, f"/edit/{drid}"), "company_name": "日期测试公司", "position": "日期岗位",
+    "publish_date": "2026-08-15", "headcount": "1", "salary": "面议",
+    "address": "测试路 9 号", "phone": "13500009999", "requirements": "测试",
+})
+_, lst2, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95")
+check("编辑后日期已更新", "2026-08-15" in lst2 and "2026-09-01" not in lst2)
+
+st, _, _ = reg.post("/add", {
+    "_csrf": csrf(reg, "/add"), "company_name": "日期非法", "position": "x",
+    "publish_date": "2026-02-30",
+})
+check("非法发布日期被拦", st == 400, st)
+
+st, dx, _ = reg.get_raw("/export/excel?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95")
+check("Excel 含发布日期列", "发布日期" in xlsx_text(dx), xlsx_text(dx)[:120])
+reg.post(f"/delete/{drid}", {"_csrf": csrf(reg, "/"), "back": "/"})
+
 # ---------- 5.5 勾选导出为单个 Word ----------
 print("[5.5] 导出选定为 Word（每条一页）")
 _, lst, _ = reg.get("/")
@@ -233,7 +284,7 @@ check("无效 id 被拦回列表", st == 302, st)
 print("[5.6] 按日期导出（起止日期）")
 _, lst, _ = reg.get("/")
 check("列表出现日期导出条", 'class="datebar"' in lst)
-check("日期条含两个日期框", lst.count('type="date"') == 2, lst.count('type="date"'))
+check("日期条含两个日期框", lst.count('<input type="date"') == 2, lst.count('<input type="date"'))
 
 TODAY = time.strftime("%Y-%m-%d")
 
