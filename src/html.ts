@@ -309,9 +309,9 @@ export function indexPage(o: LayoutOpts & {
     <thead><tr>
       <th style="width:72px">${user ? '<input type="checkbox" id="pickAll" class="pick-box" title="全选本页" aria-label="全选本页"> ' : ''}编号</th><th style="width:140px">用人单位名称</th>
       <th style="width:100px">招聘岗位</th><th style="width:52px">招聘数</th>
-      <th style="width:110px">工资待遇（元）</th><th style="width:158px">岗位要求</th>
-      <th style="width:94px">地址</th><th style="width:116px">联系电话</th>
-      <th style="width:96px">发布日期</th><th style="width:86px">招聘状态</th><th style="width:246px">操作</th>
+      <th style="width:110px">工资待遇（元）</th><th style="width:150px">岗位要求</th>
+      <th style="width:94px">地址</th><th style="width:128px">联系电话</th>
+      <th style="width:96px">发布日期</th><th style="width:86px">招聘状态</th><th style="width:242px">操作</th>
     </tr></thead>
     <tbody>${tableRows}</tbody>
   </table></div>${pager}` : empty}${pickScript}`;

@@ -207,8 +207,8 @@ a:hover { text-decoration: underline; }
   white-space: pre-line;
   line-height: 1.5;
 }
-.ops { white-space: nowrap; padding-left: 8px !important; padding-right: 8px !important; }
-.ops .btn { margin-right: 3px; }
+.ops { white-space: nowrap; padding-left: 4px !important; padding-right: 4px !important; }
+.ops .btn { margin-right: 2px; }
 /* 招聘状态徽标 */
 .st {
   display: inline-block;
