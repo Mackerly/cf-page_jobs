@@ -223,14 +223,14 @@ st, _, _ = reg.post("/add", {
     "address": "测试路 9 号", "phone": "13500009999", "requirements": "测试",
 })
 check("带发布日期新增成功", st == 302, st)
-_, lst, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95")
+_, lst, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95&show_expired=1")
 check("列表显示发布日期", "2026-09-01" in lst)
 check("列表有发布日期表头", "发布日期" in lst)
 drid = re.search(r'aria-label="选择编号 (\d+)"', lst)
 drid = int(drid.group(1)) if drid else None
 check("拿到日期测试记录 id", drid is not None, drid)
 
-_, hit, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95&start=2026-09-01&end=2026-09-01")
+_, hit, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95&start=2026-09-01&end=2026-09-01&show_expired=1")
 check("按发布日期命中", "日期测试公司" in hit)
 _, miss, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95&start=2026-09-02")
 check("区间外不命中", "日期测试公司" not in miss)
@@ -242,7 +242,7 @@ st, _, _ = reg.post(f"/edit/{drid}", {
     "publish_date": "2026-08-15", "headcount": "1", "salary": "面议",
     "address": "测试路 9 号", "phone": "13500009999", "requirements": "测试",
 })
-_, lst2, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95")
+_, lst2, _ = reg.get("/?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95&show_expired=1")
 check("编辑后日期已更新", "2026-08-15" in lst2 and "2026-09-01" not in lst2)
 
 st, _, _ = reg.post("/add", {
@@ -253,7 +253,87 @@ check("非法发布日期被拦", st == 400, st)
 
 st, dx, _ = reg.get_raw("/export/excel?q=%E6%97%A5%E6%9C%9F%E6%B5%8B%E8%AF%95")
 check("Excel 含发布日期列", "发布日期" in xlsx_text(dx), xlsx_text(dx)[:120])
-reg.post(f"/delete/{drid}", {"_csrf": csrf(reg, "/"), "back": "/"})
+for _x in set(re.findall(r'aria-label="选择编号 (\d+)"', lst2)):
+    reg.post(f"/delete/{_x}", {"_csrf": csrf(reg, "/"), "back": "/"})
+
+# ---------- 5.4b 招聘状态 ----------
+print("[5.4b] 招聘状态（招满 / 失效 / 自动失效 / 筛选 / 排序）")
+TD1 = time.strftime("%Y-%m-%d")
+OLD45 = time.strftime("%Y-%m-%d", time.localtime(time.time() - 45 * 86400))
+D3 = time.strftime("%Y-%m-%d", time.localtime(time.time() - 3 * 86400))
+
+_, page0, _ = reg.get("/")
+check("列表有招聘状态表头", "招聘状态" in page0)
+check("列表有状态徽标", 'class="st st-' in page0)
+check("列表有状态筛选开关", 'name="show_full"' in page0 and 'name="show_expired"' in page0)
+
+_, addpage2, _ = reg.get("/add")
+check("新增页有状态下拉", 'name="status"' in addpage2)
+check("状态下拉三个选项",
+      addpage2.count('value="active"') + addpage2.count('value="full"')
+      + addpage2.count('value="expired"') == 3)
+check("状态字段在发布日期之前", addpage2.index('name="status"') < addpage2.index('name="publish_date"'))
+check("发布日期仍在岗位要求之前",
+      addpage2.index('name="publish_date"') < addpage2.index('name="requirements"'))
+
+
+def add_rec(company, position, pub, status=""):
+    body = {"_csrf": csrf(reg, "/add"), "company_name": company, "position": position,
+            "publish_date": pub, "headcount": "1"}
+    if status:
+        body["status"] = status
+    return reg.post("/add", body)[0]
+
+
+check("新增在招记录", add_rec("状态在招公司", "岗位A", TD1) == 302)
+check("新增招满记录", add_rec("状态招满公司", "岗位F", TD1, "full") == 302)
+check("新增手动失效记录", add_rec("状态失效公司", "岗位E", TD1, "expired") == 302)
+check("新增过期记录", add_rec("状态过期公司", "岗位O", OLD45) == 302)
+check("新增排序新记录", add_rec("排序新公司", "岗位N", TD1) == 302)
+check("新增排序旧记录", add_rec("排序旧公司", "岗位P", D3) == 302)
+
+Q = urllib.parse.quote("状态")
+_, only, _ = reg.get(f"/?q={Q}")
+check("默认显示在招", "状态在招公司" in only)
+check("默认隐藏招满", "状态招满公司" not in only)
+check("默认隐藏手动失效", "状态失效公司" not in only)
+check("默认隐藏自动失效", "状态过期公司" not in only)
+check("有已隐藏提示", "已隐藏" in only)
+
+_, wf, _ = reg.get(f"/?q={Q}&show_full=1")
+check("勾选后显示招满", "状态招满公司" in wf and "状态失效公司" not in wf)
+check("招满徽标", "st-full" in wf)
+
+_, we, _ = reg.get(f"/?q={Q}&show_expired=1")
+check("勾选后显示手动失效", "状态失效公司" in we)
+check("勾选后显示自动失效", "状态过期公司" in we)
+check("失效徽标", "st-expired" in we)
+
+_, wall, _ = reg.get(f"/?q={Q}&show_full=1&show_expired=1")
+check("全部显示四种状态都在", all(x in wall for x in (
+    "状态在招公司", "状态招满公司", "状态失效公司", "状态过期公司")))
+
+# 排序：发布日期倒序，最新发布在前
+QS = urllib.parse.quote("排序")
+_, srt, _ = reg.get(f"/?q={QS}")
+check("按发布日期倒序（新在前）", srt.index("排序新公司") < srt.index("排序旧公司"))
+
+# 编辑页回填状态
+_, editpage, _ = reg.get(f"/edit/{RID}")
+check("编辑页有状态下拉", 'name="status"' in editpage)
+check("编辑页默认选中在招", '<option value="active" selected' in editpage)
+
+# 状态写进 Excel
+_, dx2, _ = reg.get_raw(f"/export/excel?q={Q}&show_full=1&show_expired=1")
+check("Excel 含招聘状态列", "招聘状态" in xlsx_text(dx2), xlsx_text(dx2)[:120])
+
+# 清理本节数据
+for kw in ("状态", "排序"):
+    _, pl, _ = reg.get(f"/?q={urllib.parse.quote(kw)}&show_full=1&show_expired=1&per=50")
+    for x in set(re.findall(r'aria-label="选择编号 (\d+)"', pl)):
+        reg.post(f"/delete/{x}", {"_csrf": csrf(reg, "/"), "back": "/"})
+_, after, _ = reg.get(f"/?q={Q}&show_full=1&show_expired=1")
+check("状态测试数据已清理", "状态在招公司" not in after)
 
 # ---------- 5.5 勾选导出为单个 Word ----------
 print("[5.5] 导出选定为 Word（每条一页）")

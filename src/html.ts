@@ -2,7 +2,10 @@
  * 服务端渲染的 HTML 页面（模板字符串，无模板引擎依赖）
  */
 import { CSS } from './css';
-import { DocInfo, FIELD_LABELS, FIELDS, QR_CAPTION, todayIso } from './format';
+import {
+  DocInfo, FIELD_LABELS, FIELDS, QR_CAPTION, STATUS_LABELS, STATUS_OPTIONS, effStatus, normStatus,
+  todayIso,
+} from './format';
 
 export function h(s: unknown): string {
   return String(s ?? '')
@@ -109,21 +112,33 @@ export function indexPage(o: LayoutOpts & {
   rows: any[]; q: string; page: number; pages: number; total: number;
   per: number; perChoices: number[]; pageNums: number[];
   start: string; end: string; filtered: boolean;
+  showFull: boolean; showExpired: boolean;
+  hiddenFull: number; hiddenExpired: number;
 }): string {
   const { rows, q, page, pages, total, user, per, start, end, filtered } = o;
+  const { showFull, showExpired, hiddenFull, hiddenExpired } = o;
   const defaultPer = o.perChoices[0] || 15;
+  const today = todayIso();
 
-  // 列表页链接：带上关键词、日期区间与每页条数（page=1、per=默认值时省略）
+  // 列表页链接：带上关键词、日期区间、状态开关与每页条数（page=1、per=默认值时省略）
   const listUrl = (p: number) => `/${qs({
     q: q || undefined,
     start: start || undefined,
     end: end || undefined,
+    show_full: showFull ? '1' : undefined,
+    show_expired: showExpired ? '1' : undefined,
     per: per === defaultPer ? undefined : per,
     page: p > 1 ? p : undefined,
   })}`;
 
-  const tableRows = rows.map((r) => `
-    <tr>
+  // 状态开关的隐藏域（放进搜索框 / 导出表单里，避免一提交就把状态重置回默认）
+  const statusHidden = `${showFull ? '<input type="hidden" name="show_full" value="1">' : ''}`
+    + `${showExpired ? '<input type="hidden" name="show_expired" value="1">' : ''}`;
+
+  const tableRows = rows.map((r) => {
+    const st = String(r.eff_status || effStatus(r, today));
+    return `
+    <tr class="${st === 'expired' ? 'row-expired' : st === 'full' ? 'row-full' : ''}">
       <td class="mono">${user ? `<input type="checkbox" class="pick-box" name="ids" value="${r.id}"
         form="selForm" aria-label="选择编号 ${r.id}"> ` : ''}${r.id}</td>
       <td class="strong">${h(r.company_name)}</td>
@@ -135,6 +150,7 @@ export function indexPage(o: LayoutOpts & {
       <td class="small">${h(r.address || '—')}</td>
       <td class="mono">${h(r.phone || '—')}</td>
       <td class="mono center">${h(r.publish_date || '—')}</td>
+      <td class="center"><span class="st st-${st}">${h(STATUS_LABELS[st] || '招聘中')}</span></td>
       <td class="ops">
         <a class="btn btn-xs" href="/preview/${r.id}">预览</a>
         <a class="btn btn-xs btn-primary" href="/docx/${r.id}">Word</a>
@@ -147,7 +163,8 @@ export function indexPage(o: LayoutOpts & {
         </form>`
         : `<a class="btn btn-xs btn-ghost" href="/login?next=${encodeURIComponent(`/edit/${r.id}`)}" title="编辑与删除需登录">🔒 编辑</a>`}
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   const pager = `
     <div class="pager">
@@ -224,13 +241,29 @@ export function indexPage(o: LayoutOpts & {
 })();
 </script>` : '';
 
+  const hiddenParts: string[] = [];
+  if (!showFull && hiddenFull) hiddenParts.push(`<b>${hiddenFull}</b> 条「已招满」`);
+  if (!showExpired && hiddenExpired) hiddenParts.push(`<b>${hiddenExpired}</b> 条「已失效」`);
+  const allUrl = `/${qs({
+    q: q || undefined,
+    start: start || undefined,
+    end: end || undefined,
+    show_full: '1',
+    show_expired: '1',
+    per: per === defaultPer ? undefined : per,
+  })}`;
+  const filterNote = hiddenParts.length
+    ? `<div class="filter-note">已隐藏 ${hiddenParts.join('、')}记录（发布满 1 个月自动失效），<a href="${allUrl}">全部显示</a></div>`
+    : '';
+
   const body = `
   <div class="page-head">
     <div>
       <h1>招聘信息列表</h1>
       <p class="sub">共 <b>${total}</b> 条招聘信息${
   q ? `（关键词：${h(q)}）` : ''}${
-  start || end ? `（日期：${start || '不限'} ~ ${end || '不限'}）` : ''}，每条可直接生成单页 Word 简章打印</p>
+  start || end ? `（日期：${start || '不限'} ~ ${end || '不限'}）` : ''}${
+  showFull || showExpired ? `（含${showFull ? '已招满' : ''}${showFull && showExpired ? '、' : ''}${showExpired ? '已失效' : ''}）` : ''}，每条可直接生成单页 Word 简章打印</p>
     </div>
     <div class="head-actions"><a class="btn btn-primary" href="/add">+ 新增招聘信息</a></div>
   </div>
@@ -240,6 +273,7 @@ export function indexPage(o: LayoutOpts & {
       <input type="text" name="q" value="${h(q)}" placeholder="搜索单位名称 / 岗位 / 地址 / 电话…">
       ${start ? `<input type="hidden" name="start" value="${h(start)}">` : ''}
       ${end ? `<input type="hidden" name="end" value="${h(end)}">` : ''}
+      ${statusHidden}
       <input type="hidden" name="per" value="${per}">
       <button class="btn" type="submit">搜索</button>
       ${filtered ? '<a class="btn btn-ghost" href="/">清除筛选</a>' : ''}
@@ -260,20 +294,24 @@ export function indexPage(o: LayoutOpts & {
         ${o.perChoices.map((n) => `<option value="${n}"${n === per ? ' selected' : ''}>${n} 条</option>`).join('')}
       </select>
     </label>
+    <span class="datebar-title">招聘状态</span>
+    <label class="datebar-c"><input type="checkbox" name="show_full" value="1"${showFull ? ' checked' : ''}> 显示已招满</label>
+    <label class="datebar-c"><input type="checkbox" name="show_expired" value="1"${showExpired ? ' checked' : ''}> 显示已失效</label>
     <button class="btn btn-soft" type="submit">🔍 筛选</button>
     <button class="btn btn-soft" type="submit" formaction="/export/excel">⬇ 导出 Excel</button>
     <button class="btn btn-soft" type="submit" formaction="/docx/range">📄 导出 Word（每条一页）</button>
-    <span class="datebar-hint">日期按「发布日期」比较，留空 = 全部；筛选同时作用于列表与导出</span>
+    <span class="datebar-hint">日期按「发布日期」比较，留空 = 全部；发布满 1 个月自动失效；筛选同时作用于列表与导出</span>
   </form>
+  ${filterNote}
   ${selbar}
   ${notice}
   ${rows.length ? `<div class="table-card"><table class="data-table">
     <thead><tr>
-      <th style="width:74px">${user ? '<input type="checkbox" id="pickAll" class="pick-box" title="全选本页" aria-label="全选本页"> ' : ''}编号</th><th style="width:168px">用人单位名称</th>
-      <th style="width:124px">招聘岗位</th><th style="width:58px">招聘数</th>
-      <th style="width:110px">工资待遇（元）</th><th>岗位要求</th>
-      <th style="width:118px">地址</th><th style="width:122px">联系电话</th>
-      <th style="width:106px">发布日期</th><th style="width:248px">操作</th>
+      <th style="width:72px">${user ? '<input type="checkbox" id="pickAll" class="pick-box" title="全选本页" aria-label="全选本页"> ' : ''}编号</th><th style="width:140px">用人单位名称</th>
+      <th style="width:100px">招聘岗位</th><th style="width:52px">招聘数</th>
+      <th style="width:110px">工资待遇（元）</th><th style="width:158px">岗位要求</th>
+      <th style="width:94px">地址</th><th style="width:116px">联系电话</th>
+      <th style="width:96px">发布日期</th><th style="width:86px">招聘状态</th><th style="width:246px">操作</th>
     </tr></thead>
     <tbody>${tableRows}</tbody>
   </table></div>${pager}` : empty}${pickScript}`;
@@ -557,6 +595,13 @@ export function formPage(o: LayoutOpts & {
       ${input('address', '地址', '例如：经济技术开发区兴业路 88 号', 200)}
       ${input('phone', '联系电话', '例如：0571-88886666 / 13800001234', 80)}
     </div>
+    <label class="field">
+      <span class="label">招聘状态 <small>（默认「招聘中」，发布满 1 个月自动失效）</small></span>
+      <select name="status">
+        ${STATUS_OPTIONS.map((s) => `<option value="${s.key}"${
+    s.key === normStatus(o.rec.status) ? ' selected' : ''}>${s.label}</option>`).join('')}
+      </select>
+    </label>
     <label class="field">
       <span class="label">发布日期 <small>（默认当天，可改）</small></span>
       <input type="date" name="publish_date"

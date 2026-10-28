@@ -17,7 +17,7 @@ import * as pages from './html';
 import { buildDocx, buildDocxMulti, qrBytes } from './docx';
 import { exportXlsx, buildTemplate } from './xlsx';
 import { parseImport } from './xlsx-import';
-import { FIELD_NAMES, dateRange, docFilename, multiDocFilename, nowLocal, prepare,
+import { FIELD_NAMES, dateRange, docFilename, multiDocFilename, normStatus, nowLocal, prepare,
   rangeDocFilename, rangeLabel, rangeXlsxFilename, todayIso, toIsoDate } from './format';
 import { buildWechatVariants, WECHAT_THEMES } from './wechat';
 import { CSS } from './css';
@@ -371,13 +371,19 @@ async function handleIndex(c: Ctx): Promise<Response> {
   const q = (c.url.searchParams.get('q') || '').trim();
   // 日期区间同时作用于列表与导出；留空表示不限
   const { start, end } = dateRange(c.url.searchParams.get('start'), c.url.searchParams.get('end'));
+  // 招聘状态开关：默认只显示「招聘中」，已招满 / 已失效按需勾选
+  const showFull = c.url.searchParams.get('show_full') === '1';
+  const showExpired = c.url.searchParams.get('show_expired') === '1';
+  const today = todayIso();
   const perReq = Number(c.url.searchParams.get('per') || 0);
   const per = PER_CHOICES.includes(perReq) ? perReq : PER_PAGE;
   const pageReq = Math.max(1, Number(c.url.searchParams.get('page') || 1) || 1);
-  const total = await db.countRecruit(c.env.DB, q, start, end);
+  const total = await db.countRecruit(c.env.DB, q, start, end, showFull, showExpired, today);
   const pagesTotal = Math.max(1, Math.ceil(total / per));
   const page = Math.min(pageReq, pagesTotal);
-  const rows = await db.listRecruit(c.env.DB, q, page, per, start, end);
+  const rows = await db.listRecruit(c.env.DB, q, page, per, start, end, showFull, showExpired, today);
+  // 未勾选时，告诉用户被藏了多少条，避免以为数据丢了
+  const byStatus = await db.countByStatus(c.env.DB, q, start, end, today);
 
   // 页码窗口：当前页前后各 2 页
   const pageNums: number[] = [];
@@ -387,7 +393,10 @@ async function handleIndex(c: Ctx): Promise<Response> {
     ...layoutOpts(c, '招聘列表 · 招聘信息管理系统', 'index'),
     rows, q, page, pages: pagesTotal, total,
     per, perChoices: PER_CHOICES, pageNums, start, end,
-    filtered: !!(q || start || end),
+    filtered: !!(q || start || end || showFull || showExpired),
+    showFull, showExpired,
+    hiddenFull: showFull ? 0 : byStatus.full,
+    hiddenExpired: showExpired ? 0 : byStatus.expired,
   }));
 }
 
@@ -511,6 +520,8 @@ function formDataToRecord(form: FormData): Record<string, string> {
   for (const k of FIELD_NAMES) out[k] = String(form.get(k) ?? '').trim();
   // 发布日期留空 = 当天；格式不对留给调用方报错
   out.publish_date = out.publish_date || todayIso();
+  // 招聘状态留空 / 认不出 = 招聘中（是否自动失效由展示时按发布日期算）
+  out.status = normStatus(out.status);
   return out;
 }
 
@@ -701,8 +712,10 @@ async function handleBackup(c: Ctx): Promise<Response> {
 async function handleDocxRange(c: Ctx): Promise<Response> {
   const q = (c.url.searchParams.get('q') || '').trim();
   const { start, end } = dateRange(c.url.searchParams.get('start'), c.url.searchParams.get('end'));
+  const showFull = c.url.searchParams.get('show_full') === '1';
+  const showExpired = c.url.searchParams.get('show_expired') === '1';
 
-  const rows = await db.listAllRecruit(c.env.DB, q, start, end);
+  const rows = await db.listAllRecruit(c.env.DB, q, start, end, showFull, showExpired);
   if (!rows.length) {
     await flash(c, 'error', `所选日期范围内没有招聘信息（${rangeLabel(start, end)}）`);
     return redirect(c, '/');
@@ -792,7 +805,9 @@ async function handleExport(c: Ctx): Promise<Response> {
   const q = (c.url.searchParams.get('q') || '').trim();
   // 日期留空 = 导出全部；只填一头也可以（起始 / 截至）
   const { start, end } = dateRange(c.url.searchParams.get('start'), c.url.searchParams.get('end'));
-  const rows = await db.listAllRecruit(c.env.DB, q, start, end);
+  const showFull = c.url.searchParams.get('show_full') === '1';
+  const showExpired = c.url.searchParams.get('show_expired') === '1';
+  const rows = await db.listAllRecruit(c.env.DB, q, start, end, showFull, showExpired);
   const bytes = exportXlsx(rows);
   await audit(c, '导出 Excel',
     `共 ${rows.length} 条（${rangeLabel(start, end)}${q ? `，关键词：${q}` : ''}）`);

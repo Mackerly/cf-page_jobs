@@ -19,6 +19,7 @@ export const FIELDS: FieldDef[] = [
   { key: 'address', label: '地址', required: false, type: 'text' },
   { key: 'phone', label: '联系电话', required: false, type: 'text' },
   { key: 'publish_date', label: '发布日期', required: false, type: 'text' },
+  { key: 'status', label: '招聘状态', required: false, type: 'text' },
 ];
 
 export const FIELD_NAMES = FIELDS.map((f) => f.key);
@@ -42,7 +43,79 @@ export const ALIASES: Record<string, string[]> = {
     'phone', 'tel', 'telephone', 'mobile'],
   publish_date: ['发布日期', '发布时间', '发布日', '日期',
     'publishdate', 'publish_date', 'date'],
+  status: ['招聘状态', '状态', '招聘情况', '是否招满', '有效期状态', 'status'],
 };
+
+// --------------------------------------------------------------------------- //
+// 招聘状态：招聘中 / 已招满 / 已失效
+// 存库值只有 active|full|expired；「发布满 1 个月自动失效」是展示时算出来的，
+// 不改库（否则过期后又续发就得批量改数据）。手动选了「已招满 / 已失效」则以手动为准。
+// --------------------------------------------------------------------------- //
+export type StatusKey = 'active' | 'full' | 'expired';
+
+export const STATUS_OPTIONS: { key: StatusKey; label: string }[] = [
+  { key: 'active', label: '招聘中' },
+  { key: 'full', label: '已招满' },
+  { key: 'expired', label: '已失效' },
+];
+
+export const STATUS_LABELS: Record<string, string> = {
+  active: '招聘中',
+  full: '已招满',
+  expired: '已失效',
+};
+
+/** 发布后多少个月自动失效 */
+export const EXPIRE_MONTHS = 1;
+
+/** 各种写法的状态 -> 标准值；认不出的一律当「招聘中」 */
+export function normStatus(raw: unknown): StatusKey {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (!s) return 'active';
+  if (['full', '已招满', '招满', '已满', '满员', '名额已满'].includes(s)) return 'full';
+  if (['expired', '已失效', '失效', '过期', '已过期', '作废', '结束', '已结束', '停招'].includes(s)) {
+    return 'expired';
+  }
+  if (['active', '招聘中', '在招', '有效', '正常', '进行中'].includes(s)) return 'active';
+  return 'active';
+}
+
+/**
+ * 发布日期 + N 个月 -> YYYY-MM-DD。
+ * 月末溢出按 SQLite `date(x,'+1 month')` 的规则进位（1-31 + 1 个月 = 3-03），
+ * 保证 JS 与 SQL 的判定完全一致。无法解析返回空串。
+ */
+export function addMonths(iso: string, months = EXPIRE_MONTHS): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? '').trim());
+  if (!m) return '';
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1 + months, Number(m[3])));
+  if (Number.isNaN(dt.getTime())) return '';
+  return dt.toISOString().slice(0, 10);
+}
+
+/** 有效期最后一天（含当天仍算有效） */
+export function expireDate(iso: string): string {
+  return addMonths(iso, EXPIRE_MONTHS);
+}
+
+/** 是否已过有效期：today > 发布日 + 1 个月 */
+export function isExpired(publishDate: string, today: string): boolean {
+  const exp = expireDate(publishDate);
+  return !!exp && exp < today;
+}
+
+/** 实际状态：手动「已招满 / 已失效」优先，否则发布满 1 个月自动失效 */
+export function effStatus(rec: Record<string, any> | null | undefined, today: string): StatusKey {
+  const s = normStatus(rec?.status);
+  if (s !== 'active') return s;
+  return isExpired(String(rec?.publish_date ?? ''), today) ? 'expired' : 'active';
+}
+
+/** 状态标签 */
+export function statusLabel(key: string): string {
+  return STATUS_LABELS[key] || '招聘中';
+}
+
 
 // --------------------------------------------------------------------------- //
 // 展示格式化

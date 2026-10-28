@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS recruit (
     address      TEXT DEFAULT '',
     phone        TEXT DEFAULT '',
     publish_date TEXT DEFAULT '',          -- 发布日期 YYYY-MM-DD（表单默认当天，筛选也用它）
+    status       TEXT DEFAULT 'active',    -- 招聘状态 active 招聘中 | full 已招满 | expired 已失效
+                                           -- 「发布满 1 个月自动失效」是展示时算的，不写库
     created_at   TEXT DEFAULT '',
     updated_at   TEXT DEFAULT ''
 );

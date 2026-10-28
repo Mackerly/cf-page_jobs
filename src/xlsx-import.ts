@@ -3,7 +3,7 @@
  * 支持 .xlsx / .xlsm / .csv，表头名称容错（别名映射），逐行校验并返回行号错误
  */
 import { unzipSync, strFromU8 } from 'fflate';
-import { ALIASES, FIELD_LABELS, FIELD_NAMES, toIsoDate, todayIso } from './format';
+import { ALIASES, FIELD_LABELS, FIELD_NAMES, normStatus, toIsoDate, todayIso } from './format';
 
 export interface ParseResult {
   valid: Record<string, string>[];
@@ -267,6 +267,8 @@ export function parseImport(filename: string, bytes: Uint8Array): ParseResult {
     } else {
       item.publish_date = todayIso();
     }
+    // 招聘状态：认不出 / 留空一律当「招聘中」，不因为这一列写错就丢整行
+    item.status = normStatus(item.status);
     valid.push(item);
   }
 

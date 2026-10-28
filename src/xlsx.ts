@@ -2,7 +2,7 @@
  * Excel 导出与导入模板生成（纯 OOXML，不依赖 SheetJS / openpyxl）
  */
 import { zipSync, strToU8 } from 'fflate';
-import { HEADERS, todayIso } from './format';
+import { HEADERS, STATUS_LABELS, effStatus, todayIso } from './format';
 
 const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 
@@ -176,7 +176,10 @@ export function exportXlsx(rows: Record<string, any>[]): Uint8Array {
     const cells: Cell[] = [{ v: i + 1, s: 3 }];
     const values = [
       r.company_name, r.position, r.headcount, r.requirements,
-      r.salary, r.address, r.phone, r.publish_date, r.created_at,
+      r.salary, r.address, r.phone, r.publish_date,
+      // 导出「实际状态」：发布满 1 个月的自动失效也会写成「已失效」
+      STATUS_LABELS[String(r.eff_status || effStatus(r, todayIso()))] || '招聘中',
+      r.created_at,
     ];
     values.forEach((v, ci) => {
       // 第 2/3/5/7 列（公司、岗位、要求、地址）左对齐换行，其余居中
@@ -189,7 +192,7 @@ export function exportXlsx(rows: Record<string, any>[]): Uint8Array {
 
   return pack([{
     name: '招聘信息',
-    cols: [6, 26, 18, 12, 46, 16, 30, 16, 14, 20],
+    cols: [6, 26, 18, 12, 46, 16, 30, 16, 14, 12, 20],
     rows: [header, ...body],
     rowHeights: Object.fromEntries([
       [1, 26],
@@ -206,7 +209,7 @@ export function buildTemplate(): Uint8Array {
   const sample: Cell[] = [
     '示例：星辰精密机械有限公司', '数控车床操作工', '6',
     '1. 年龄 20-45 周岁，身体健康；\n2. 有相关经验者优先。',
-    '6000-9000', '经济技术开发区兴业路 88 号', '0571-88886666', todayIso(),
+    '6000-9000', '经济技术开发区兴业路 88 号', '0571-88886666', todayIso(), '招聘中',
   ].map((v, i) => ({ v, s: [0, 1, 3, 5].includes(i) ? 4 : 5 }));
 
   const tips = [
@@ -216,9 +219,10 @@ export function buildTemplate(): Uint8Array {
     '3. 「招聘数（人）」建议只填数字，如 6；也可填「若干」。',
     '4. 「岗位要求」可在一格内换行填写多条要求（Alt+Enter 换行）。',
     '5. 「发布日期」填 2026-10-28 / 2026/10/28 都可以；留空则自动取导入当天。',
-    '6. 模板中的示例行请删除后再填写，或直接覆盖。',
-    '7. 支持 .xlsx / .xlsm / .csv 格式；.xls 请先另存为 .xlsx。',
-    '8. 表头名称容错：如「公司名称」「岗位」「薪资」「电话」等常见写法均可识别。',
+    '6. 「招聘状态」填 招聘中 / 已招满 / 已失效，留空按「招聘中」处理；发布满 1 个月自动失效。',
+    '7. 模板中的示例行请删除后再填写，或直接覆盖。',
+    '8. 支持 .xlsx / .xlsm / .csv 格式；.xls 请先另存为 .xlsx。',
+    '9. 表头名称容错：如「公司名称」「岗位」「薪资」「电话」等常见写法均可识别。',
   ].map((t, i) => [{ v: t, s: i === 0 ? 3 : 2 }]);
 
   return pack([

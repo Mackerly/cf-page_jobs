@@ -1,7 +1,7 @@
 /**
  * D1 数据访问层
  */
-import { FIELD_NAMES, nowLocal, todayIso } from './format';
+import { FIELD_NAMES, EXPIRE_MONTHS, nowLocal, todayIso } from './format';
 
 export interface Env {
   DB: any;                       // D1Database
@@ -13,7 +13,42 @@ export interface Env {
 
 const LIKE_FIELDS = ['company_name', 'position', 'requirements', 'address', 'phone', 'salary'];
 
-function whereClause(keyword: string, start = '', end = ''): { sql: string; args: string[] } {
+// --------------------------------------------------------------------------- //
+// 招聘状态相关的 SQL 片段
+// 与 format.ts 的 effStatus() 完全等价（同样的「+1 个月」溢出规则）：
+//   已招满  = status='full'
+//   已失效  = status='expired' 或（status='active' 且 发布日+1个月 < 今天）
+//   招聘中  = status='active' 且未过期
+// today 只来自 todayIso()，格式固定为 YYYY-MM-DD，可安全内联。
+// --------------------------------------------------------------------------- //
+const MONTH = `'+${EXPIRE_MONTHS} month'`;
+
+/** 已过期条件（只对 publish_date 有效的行成立） */
+function expiredCond(today: string): string {
+  return `(publish_date <> '' AND date(substr(publish_date, 1, 10), ${MONTH}) < '${today}')`;
+}
+
+/** SELECT 里用的「实际状态」列 */
+export function statusExpr(today: string): string {
+  return `CASE WHEN status = 'full' THEN 'full'`
+    + ` WHEN status = 'expired' THEN 'expired'`
+    + ` WHEN ${expiredCond(today)} THEN 'expired'`
+    + ` ELSE 'active' END`;
+}
+
+/** 状态筛选：招聘中恒定显示，招满 / 失效按勾选决定 */
+function statusCond(showFull: boolean, showExpired: boolean, today: string): string {
+  const exp = expiredCond(today);
+  const groups = [`(status = 'active' AND NOT ${exp})`];
+  if (showFull) groups.push(`status = 'full'`);
+  if (showExpired) groups.push(`(status = 'expired' OR (status = 'active' AND ${exp}))`);
+  return '(' + groups.join(' OR ') + ')';
+}
+
+function whereClause(
+  keyword: string, start = '', end = '', showFull = false, showExpired = false,
+  today = todayIso(),
+): { sql: string; args: string[] } {
   const conds: string[] = [];
   const args: string[] = [];
 
@@ -25,35 +60,63 @@ function whereClause(keyword: string, start = '', end = ''): { sql: string; args
   // 按「发布日期」筛选（YYYY-MM-DD，取前 10 位兼容带时间的旧数据）
   if (start) { conds.push('substr(publish_date, 1, 10) >= ?'); args.push(start); }
   if (end) { conds.push('substr(publish_date, 1, 10) <= ?'); args.push(end); }
+  conds.push(statusCond(showFull, showExpired, today));
 
-  return { sql: conds.length ? ' WHERE ' + conds.join(' AND ') : '', args };
+  return { sql: ' WHERE ' + conds.join(' AND '), args };
 }
+
 
 // --------------------------------------------------------------------------- //
 // 招聘信息
 // --------------------------------------------------------------------------- //
-export async function countRecruit(db: any, keyword = '', start = '', end = ''): Promise<number> {
-  const { sql, args } = whereClause(keyword, start, end);
+export async function countRecruit(
+  db: any, keyword = '', start = '', end = '', showFull = false, showExpired = false,
+  today = todayIso(),
+): Promise<number> {
+  const { sql, args } = whereClause(keyword, start, end, showFull, showExpired, today);
   const row = await db.prepare(`SELECT COUNT(*) AS n FROM recruit${sql}`).bind(...args).first();
   return Number(row?.n ?? 0);
 }
 
+/** 按实际状态分组统计（用于「已隐藏 N 条」提示），不受状态筛选影响 */
+export async function countByStatus(
+  db: any, keyword = '', start = '', end = '', today = todayIso(),
+): Promise<{ active: number; full: number; expired: number }> {
+  const { sql, args } = whereClause(keyword, start, end, true, true, today);
+  const res = await db.prepare(
+    `SELECT ${statusExpr(today)} AS s, COUNT(*) AS n FROM recruit${sql} GROUP BY s`,
+  ).bind(...args).all();
+  const out = { active: 0, full: 0, expired: 0 } as Record<string, number>;
+  for (const r of res.results ?? []) out[String(r.s)] = Number(r.n ?? 0);
+  return { active: out.active, full: out.full, expired: out.expired };
+}
+
 export async function listRecruit(
   db: any, keyword = '', page = 1, perPage = 15, start = '', end = '',
+  showFull = false, showExpired = false, today = todayIso(),
 ) {
-  const { sql, args } = whereClause(keyword, start, end);
+  const { sql, args } = whereClause(keyword, start, end, showFull, showExpired, today);
   const offset = (page - 1) * perPage;
   const res = await db
-    .prepare(`SELECT * FROM recruit${sql} ORDER BY id DESC LIMIT ? OFFSET ?`)
+    .prepare(
+      `SELECT *, ${statusExpr(today)} AS eff_status FROM recruit${sql}`
+      + ' ORDER BY substr(publish_date, 1, 10) DESC, id DESC LIMIT ? OFFSET ?',
+    )
     .bind(...args, perPage, offset).all();
   return res.results ?? [];
 }
 
-export async function listAllRecruit(db: any, keyword = '', start = '', end = '') {
-  const { sql, args } = whereClause(keyword, start, end);
-  const res = await db.prepare(`SELECT * FROM recruit${sql} ORDER BY id ASC`).bind(...args).all();
+export async function listAllRecruit(
+  db: any, keyword = '', start = '', end = '', showFull = true, showExpired = true,
+  today = todayIso(),
+) {
+  const { sql, args } = whereClause(keyword, start, end, showFull, showExpired, today);
+  const res = await db
+    .prepare(`SELECT *, ${statusExpr(today)} AS eff_status FROM recruit${sql} ORDER BY id ASC`)
+    .bind(...args).all();
   return res.results ?? [];
 }
+
 
 export async function getRecruit(db: any, id: number) {
   return db.prepare('SELECT * FROM recruit WHERE id = ?').bind(id).first();

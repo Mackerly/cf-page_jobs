@@ -171,7 +171,7 @@ a:hover { text-decoration: underline; }
   overflow-x: auto;          /* 列多了窄屏可横向滚动，不挤压「岗位要求」 */
   overflow-y: hidden;
 }
-.data-table { width: 100%; min-width: 1100px; border-collapse: collapse; table-layout: fixed; }
+.data-table { width: 100%; min-width: 1270px; border-collapse: collapse; table-layout: fixed; }
 .data-table th {
   background: #f8fafd;
   border-bottom: 1px solid var(--line);
@@ -209,6 +209,25 @@ a:hover { text-decoration: underline; }
 }
 .ops { white-space: nowrap; padding-left: 8px !important; padding-right: 8px !important; }
 .ops .btn { margin-right: 3px; }
+/* 招聘状态徽标 */
+.st {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.st-active { color: #1d7a4d; background: #e8f6ee; border-color: #bfe3ce; }
+.st-full { color: #9a5b00; background: #fdf1dd; border-color: #f0d6a6; }
+.st-expired { color: #6b7280; background: #eef0f4; border-color: #d8dce4; }
+/* 失效行整体淡化，但仍可读 */
+.data-table tbody tr.row-expired td { color: #8a93a3; }
+.data-table tbody tr.row-expired .salary { color: #b08a86; }
+.data-table tbody tr.row-expired .st { opacity: .9; }
+.data-table tbody tr.row-full td { background: #fffdf7; }
 .ops .btn:last-child { margin-right: 0; }
 .inline { display: inline; }
 form.inline button { font-family: inherit; }
@@ -261,6 +280,7 @@ form.inline button { font-family: inherit; }
 .field input[type="text"],
 .field input[type="password"],
 .field input[type="date"],
+.field select,
 .field textarea {
   width: 100%;
   padding: 9px 12px;
@@ -278,6 +298,7 @@ form.inline button { font-family: inherit; }
 .field input[type="text"]:focus,
 .field input[type="date"]:focus,
 .field input[type="password"]:focus,
+.field select:focus,
 .field textarea:focus {
   border-color: #9db4dd;
   box-shadow: 0 0 0 3px rgba(47, 85, 151, .1);
@@ -504,6 +525,21 @@ form.inline button { font-family: inherit; }
   background: #fff; font-family: inherit; font-size: 12.5px; color: var(--text); outline: none;
 }
 .datebar-f select:focus { border-color: #9db4dd; box-shadow: 0 0 0 3px rgba(47, 85, 151, .1); }
+
+/* ---- 招聘状态筛选 ---- */
+.datebar-c {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12.5px; color: #3d4658; cursor: pointer; user-select: none;
+}
+.datebar-c input { width: 15px; height: 15px; accent-color: var(--brand); cursor: pointer; }
+.filter-note {
+  margin: -6px 0 14px; padding: 8px 14px;
+  font-size: 12.5px; color: #6b7280;
+  background: #fbfcfe; border: 1px dashed var(--line); border-radius: 9px;
+}
+.filter-note b { color: #b26a00; font-weight: 700; }
+.filter-note a { color: var(--brand); text-decoration: none; }
+.filter-note a:hover { text-decoration: underline; }
 
 /* ---- 微信发布 ---- */
 .wx-theme-card { margin-bottom: 14px; padding: 14px 16px; }
