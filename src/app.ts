@@ -7,8 +7,8 @@
  * 路由：
  *   公开：/  /preview/:id  /docx/:id  /qr.jpg  /login  /register
  *   需登录：/add /edit/:id /delete/:id /import /export/excel /docx/zip /docx/range
- *           /docx/selected /template.xlsx /password
- *   需管理员：/users /users/:id/action /audit
+ *           /docx/selected /wechat/selected /template.xlsx /password
+ *   需管理员：/users /users/:id/action /audit /backup.sql
  */
 import { zipSync } from 'fflate';
 import * as auth from './auth';
@@ -19,6 +19,7 @@ import { exportXlsx, buildTemplate } from './xlsx';
 import { parseImport } from './xlsx-import';
 import { FIELD_NAMES, dateRange, docFilename, multiDocFilename, nowLocal, prepare,
   rangeDocFilename, rangeLabel, rangeXlsxFilename } from './format';
+import { buildWechatHtml } from './wechat';
 import { CSS } from './css';
 
 const PER_PAGE = 15;
@@ -27,6 +28,8 @@ const LOCK_WINDOW = 300;          // 秒
 const MAX_REG_PER_HOUR = 5;
 const MAX_SELECTED = 200;         // 单次「导出选定为 Word」最大条数
 const MAX_RANGE = 300;            // 单次「按日期导出 Word」最大条数
+const MAX_WECHAT = 30;            // 单次「导出微信发布」最大条数（一篇推文不宜过长）
+const PER_CHOICES = [15, 30, 50, 100];   // 列表页可选的每页条数
 const DEFAULT_SITE_NAME = '招聘信息管理系统';   // SITE_NAME 未配置时的默认站名
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -95,7 +98,7 @@ function layoutOpts(c: Ctx, title: string, active?: string): pages.LayoutOpts {
     siteName,
     csrf: c.csrf, user: c.user, isAdmin: c.isAdmin,
     pendingCount: c.pending, allowRegister: c.allowRegister,
-    flashes: c.flashes, active,
+    flashes: c.flashes, active, maxWechat: MAX_WECHAT,
   };
 }
 
@@ -240,7 +243,7 @@ async function route(c: Ctx): Promise<Response> {
   // ---- 需要登录 ----
   const needLogin = [
     '/add', '/import', '/export/excel', '/docx/zip', '/docx/range', '/docx/selected',
-    '/template.xlsx', '/password',
+    '/wechat/selected', '/template.xlsx', '/password', '/backup.sql',
   ];
   const isProtected = needLogin.includes(pathname)
     || /^\/edit\/\d+$/.test(pathname) || /^\/delete\/\d+$/.test(pathname)
@@ -274,6 +277,10 @@ async function route(c: Ctx): Promise<Response> {
   if (pathname === '/docx/selected') {
     return method === 'POST' ? handleDocxSelected(c, form!) : redirect(c, '/');
   }
+  if (pathname === '/wechat/selected') {
+    return method === 'POST' ? handleWechatSelected(c, form!) : redirect(c, '/');
+  }
+  if (pathname === '/backup.sql') return handleBackup(c);
 
   if (pathname === '/password') {
     return method === 'POST' ? handlePasswordPost(c, form!) : handlePasswordGet(c);
@@ -362,14 +369,25 @@ async function handleSetup(c: Ctx, form: FormData | null): Promise<Response> {
 // --------------------------------------------------------------------------- //
 async function handleIndex(c: Ctx): Promise<Response> {
   const q = (c.url.searchParams.get('q') || '').trim();
+  // 日期区间同时作用于列表与导出；留空表示不限
+  const { start, end } = dateRange(c.url.searchParams.get('start'), c.url.searchParams.get('end'));
+  const perReq = Number(c.url.searchParams.get('per') || 0);
+  const per = PER_CHOICES.includes(perReq) ? perReq : PER_PAGE;
   const pageReq = Math.max(1, Number(c.url.searchParams.get('page') || 1) || 1);
-  const total = await db.countRecruit(c.env.DB, q);
-  const pagesTotal = Math.max(1, Math.ceil(total / PER_PAGE));
+  const total = await db.countRecruit(c.env.DB, q, start, end);
+  const pagesTotal = Math.max(1, Math.ceil(total / per));
   const page = Math.min(pageReq, pagesTotal);
-  const rows = await db.listRecruit(c.env.DB, q, page, PER_PAGE);
+  const rows = await db.listRecruit(c.env.DB, q, page, per, start, end);
+
+  // 页码窗口：当前页前后各 2 页
+  const pageNums: number[] = [];
+  for (let n = Math.max(1, page - 2); n <= Math.min(pagesTotal, page + 2); n++) pageNums.push(n);
+
   return htmlRes(c, pages.indexPage({
     ...layoutOpts(c, '招聘列表 · 招聘信息管理系统', 'index'),
     rows, q, page, pages: pagesTotal, total,
+    per, perChoices: PER_CHOICES, pageNums, start, end,
+    filtered: !!(q || start || end),
   }));
 }
 
@@ -569,12 +587,18 @@ async function handleDocx(c: Ctx, id: number): Promise<Response> {
  * 勾选多条 → 导出到同一个 Word，每条一页（需登录）。
  * 表单字段 ids 可重复出现，顺序即页面顺序。
  */
-async function handleDocxSelected(c: Ctx, form: FormData): Promise<Response> {
+/** 取表单里勾选的编号：去重、保持勾选顺序、丢弃非法值 */
+function collectIds(form: FormData): number[] {
   const ids: number[] = [];
   for (const raw of form.getAll('ids')) {
     const n = Number(String(raw).trim());
     if (Number.isInteger(n) && n > 0 && !ids.includes(n)) ids.push(n);
   }
+  return ids;
+}
+
+async function handleDocxSelected(c: Ctx, form: FormData): Promise<Response> {
+  const ids = collectIds(form);
 
   if (!ids.length) {
     await flash(c, 'error', '请先勾选要导出的招聘信息');
@@ -596,6 +620,53 @@ async function handleDocxSelected(c: Ctx, form: FormData): Promise<Response> {
   await audit(c, '导出选定 Word',
     `共 ${rows.length} 份（编号 ${rows.map((r: any) => r.id).join(',')}）`);
   return fileRes(c, bytes, multiDocFilename(rows.length), DOCX_MIME);
+}
+
+/**
+ * 勾选多条 → 生成公众号可粘贴的 HTML（需登录）。
+ * 返回一个预览页，带「复制到公众号 / 复制源码 / 下载 .html」三个动作。
+ */
+async function handleWechatSelected(c: Ctx, form: FormData): Promise<Response> {
+  const ids = collectIds(form);
+  if (!ids.length) {
+    await flash(c, 'error', '请先勾选要发布到公众号的招聘信息');
+    return redirect(c, '/');
+  }
+  if (ids.length > MAX_WECHAT) {
+    await flash(c, 'error', `一篇推文最多放 ${MAX_WECHAT} 条，请分批勾选（当前 ${ids.length} 条）`);
+    return redirect(c, '/');
+  }
+
+  const rows = await db.getRecruitsByIds(c.env.DB, ids);
+  if (!rows.length) {
+    await flash(c, 'error', '勾选的招聘信息已不存在，请刷新页面后重试');
+    return redirect(c, '/');
+  }
+
+  const htmlCode = buildWechatHtml(rows.map((r: any) => prepare(r, true)));
+  await audit(c, '导出微信发布', `共 ${rows.length} 条（编号 ${rows.map((r: any) => r.id).join(',')}）`);
+  const stamp = nowLocal().replace(/[-:]/g, '').replace(' ', '_').slice(0, 13);
+  return htmlRes(c, pages.wechatPage({
+    ...layoutOpts(c, '微信发布 · 招聘信息管理系统'),
+    htmlCode, count: rows.length,
+    downloadName: `招聘微信发布_${stamp}_${rows.length}条.html`,
+  }));
+}
+
+/**
+ * 整库导出为 SQL（仅管理员）：表结构 + 索引 + 全部数据，可直接重放恢复。
+ */
+async function handleBackup(c: Ctx): Promise<Response> {
+  if (!c.isAdmin) {
+    await flash(c, 'error', '只有管理员才能备份数据库');
+    return redirect(c, '/');
+  }
+  const { sql, bytes, truncated } = await db.dumpSql(c.env.DB);
+  await audit(c, '备份数据库',
+    `下载 SQL 备份（${(bytes / 1024).toFixed(1)} KB${
+      truncated.length ? `，已截断：${truncated.join('、')}` : ''}）`);
+  const stamp = nowLocal().replace(/[-:]/g, '').replace(' ', '_').slice(0, 15);
+  return fileRes(c, new TextEncoder().encode(sql), `招聘信息备份_${stamp}.sql`, 'application/sql');
 }
 
 /**

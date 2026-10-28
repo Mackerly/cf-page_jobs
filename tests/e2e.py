@@ -112,7 +112,7 @@ for path in ("/", "/login", "/register", f"/docx/{RID}", "/qr.jpg", f"/preview/{
     st, _, _ = S().get(path)
     check(f"公开可访问 {path}", st == 200, st)
 for path in ("/add", "/import", "/export/excel", "/docx/zip", "/docx/range", "/docx/selected",
-             "/template.xlsx", "/users", "/audit"):
+             "/template.xlsx", "/users", "/audit", "/backup.sql"):
     st, _, hd = S().get(path)
     check(f"匿名拦截 {path}", st == 302 and "/login" in hd.get("Location", ""), f"{st} {hd.get('Location')}")
 
@@ -277,6 +277,136 @@ check("起止颠倒自动对调", docx_pages(rev_docx)[0] == ALL, docx_pages(rev
 st, open_docx, _ = reg.get_raw(f"/docx/range?start={TODAY}")
 check("只填起始 = 该天起", docx_pages(open_docx)[0] == TD, (docx_pages(open_docx)[0], TD))
 
+# ---------- 5.7 分页与每页条数 ----------
+print("[5.7] 分页 / 每页条数 / 列表日期筛选")
+_, lst, _ = reg.get("/")
+check("列表出现每页条数下拉", 'id="perSel"' in lst)
+check("下拉有 4 个档位", lst.count('<option value="') >= 4, lst.count('<option value="'))
+check("分页信息含总条数", "共 " in lst and "每页 15 条" in lst)
+
+# 造 16 条数据，保证能翻页
+token_add = csrf(reg, "/add")
+made = []
+for i in range(16):
+    nm = f"分页测试公司{i:02d}"
+    st, _, _ = reg.post("/add", {
+        "_csrf": token_add, "company_name": nm, "position": f"分页岗位{i:02d}",
+        "headcount": "2", "salary": "4000-5000", "address": "测试路 2 号",
+        "phone": "13500002222", "requirements": "1. 测试；",
+    })
+    if st == 302:
+        made.append(nm)
+check("批量造数成功", len(made) == 16, len(made))
+
+p1, l1, _ = reg.get("/")
+check("第 1 页返回 200", p1 == 200, p1)
+ids1 = re.findall(r'aria-label="选择编号 (\d+)"', l1)
+check("默认每页 15 条", len(ids1) == 15, len(ids1))
+check("页码按钮出现", 'class="pager-num' in l1)
+check("有下一页", "下一页" in l1)
+check("有末页", "末页" in l1)
+
+_, l2, _ = reg.get("/?page=2")
+ids2 = re.findall(r'aria-label="选择编号 (\d+)"', l2)
+check("第 2 页有数据", len(ids2) > 0, len(ids2))
+check("第 1、2 页不重复", not set(ids1) & set(ids2), (ids1[:3], ids2[:3]))
+
+_, l30, _ = reg.get("/?per=30")
+check("per=30 生效", "每页 30 条" in l30)
+check("per=30 保留在翻页链接", "per=30" in l30)
+check("per=30 下拉选中", 'value="30" selected' in l30)
+ids30 = re.findall(r'aria-label="选择编号 (\d+)"', l30)
+check("per=30 一页装下更多", len(ids30) >= len(ids1), (len(ids30), len(ids1)))
+
+_, l100, _ = reg.get("/?per=100")
+check("per=100 生效", "每页 100 条" in l100)
+
+_, lbad, _ = reg.get("/?per=999")
+check("非法 per 回退 15", "每页 15 条" in lbad, lbad[lbad.find("pager-info"):lbad.find("pager-info") + 50])
+
+# 关键词 + 每页条数组合
+_, lq, _ = reg.get("/?q=%E5%88%86%E9%A1%B5%E6%B5%8B%E8%AF%95&per=50")
+check("搜索保留 per=50", "per=50" in lq and "每页 50 条" in lq)
+check("搜索命中 16 条", len(re.findall(r'aria-label="选择编号 (\d+)"', lq)) == 16,
+      len(re.findall(r'aria-label="选择编号 (\d+)"', lq)))
+
+# 列表按日期筛选
+_, ltoday, _ = reg.get(f"/?start={TODAY}&end={TODAY}")
+check("列表日期筛选生效", len(re.findall(r'aria-label="选择编号 (\d+)"', ltoday)) >= 1)
+check("副标题显示日期", TODAY in ltoday)
+check("日期框回填", f'value="{TODAY}"' in ltoday)
+
+_, lempty, _ = reg.get("/?start=2000-01-01&end=2000-01-02")
+check("空区间显示空状态", "没有符合条件的招聘信息" in lempty)
+
+# 清理：删掉刚造的 16 条
+_, lall, _ = reg.get("/?q=%E5%88%86%E9%A1%B5%E6%B5%8B%E8%AF%95&per=50")
+del_ids = re.findall(r'aria-label="选择编号 (\d+)"', lall)
+token_del = csrf(reg, "/")
+for did in del_ids:
+    reg.post(f"/delete/{did}", {"_csrf": token_del, "back": "/"})
+_, lafter, _ = reg.get("/?q=%E5%88%86%E9%A1%B5%E6%B5%8B%E8%AF%95")
+check("测试数据已清理", "没有符合条件的招聘信息" in lafter)
+
+# ---------- 5.8 微信发布 HTML ----------
+print("[5.8] 导出微信发布 HTML")
+_, lst, _ = reg.get("/")
+check("选择条有微信发布按钮", "/wechat/selected" in lst and "微信发布" in lst)
+check("选择条有两个导出按钮", lst.count('class="btn btn-primary btn-xs sel-act"')
+      + lst.count('class="btn btn-soft btn-xs sel-act"') == 2)
+
+st, wx, _ = reg.post("/wechat/selected", {"_csrf": sel_token, "ids": [str(RID), str(rid)]})
+check("微信发布 200", st == 200, st)
+check("含预览区", 'id="wxPreview"' in wx)
+check("含源码框", 'id="wxCode"' in wx)
+check("含复制到公众号按钮", "复制到公众号" in wx)
+check("含复制源码按钮", "复制 HTML 源码" in wx)
+check("含下载按钮", "下载 .html" in wx)
+check("提示图片需手动插入", "二维码" in wx)
+
+preview = wx.split('id="wxPreview"')[1].split('class="card wx-code-card"')[0]
+check("预览含行内样式 section", '<section style="font-size:15px' in preview)
+check("预览无 <style> 标签", "<style" not in preview)
+check("预览无 class 属性", 'class="' not in preview)
+check("预览含序号 01", ">01</span>" in preview, preview[:200])
+check("预览含薪资福利", "薪资福利" in preview)
+check("预览含具体信息", "具体信息" in preview)
+check("预览含温馨提示", "温馨提示" in preview)
+check("预览含单位名", "Worker测试有限公司" in preview)
+check("预览含岗位名", "质检员（改）" in preview)
+
+code = wx.split('id="wxCode"')[1]
+check("源码框是转义后的 HTML", "&lt;section" in code)
+
+st, _, _ = reg.post("/wechat/selected", {"_csrf": sel_token})
+check("未勾选跳回列表", st == 302, st)
+st, _, _ = reg.post("/wechat/selected",
+                    {"_csrf": sel_token, "ids": [str(i) for i in range(1, 32)]})
+check("超过 30 条被拦", st == 302, st)
+st, _, _ = S().post("/wechat/selected", {"ids": [str(RID)]})
+check("匿名不能导出微信", st in (302, 400), st)
+
+# ---------- 5.9 数据库备份 ----------
+print("[5.9] 管理员备份数据库为 SQL")
+st, dump, hd = adm.get_raw("/backup.sql")
+sql = dump.decode("utf-8", "replace")
+check("管理员可下载备份", st == 200, st)
+check("返回 SQL 文本", sql.lstrip().startswith("--"), sql[:40])
+check("含建表语句", "CREATE TABLE" in sql)
+check("含索引", "CREATE INDEX" in sql)
+check("含事务包裹", "BEGIN TRANSACTION;" in sql and "COMMIT;" in sql)
+check("含 recruit 表数据", 'INSERT INTO "recruit"' in sql)
+check("含 users 表数据", 'INSERT INTO "users"' in sql)
+check("不含 D1 内部表", "_cf_KV" not in sql and "sqlite_" not in sql)
+check("附件文件名是 .sql", ".sql" in urllib.parse.unquote(hd.get("Content-Disposition", "")),
+      hd.get("Content-Disposition"))
+check("含恢复说明", "恢复" in sql)
+
+st, _, hd = reg.get("/backup.sql")
+check("普通用户不能备份", st == 302, st)
+st, _, hd = S().get("/backup.sql")
+check("匿名不能备份", st == 302 and "/login" in hd.get("Location", ""), st)
+
 # ---------- 6. 停用 ----------
 print("[6] 停用即时失效")
 st, _, _ = adm.post(f"/users/{uid}/action",
@@ -310,6 +440,13 @@ check("删除成功", st == 302, st)
 _, lst, _ = reg.get("/")
 # 用记录 id 判断（库里可能残留上次中断测试的同名数据）
 check("已从列表移除", f'/edit/{rid}"' not in lst)
+
+# ---------- 8.5 清理测试账号 ----------
+# 注册限流是「同一 IP 每小时 5 次」，测试账号用完即删，避免反复跑测试把额度用光
+st, _, _ = adm.post(f"/users/{uid}/action", {"_csrf": csrf(adm, "/users"), "action": "delete"})
+check("测试账号已清理", st == 302, st)
+_, users_left, _ = adm.get("/users")
+check("清理后列表不含测试账号", f">{uname}<" not in users_left)
 
 # ---------- 9. 审计 ----------
 print("[9] 审计日志")

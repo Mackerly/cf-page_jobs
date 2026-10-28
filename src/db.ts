@@ -32,14 +32,16 @@ function whereClause(keyword: string, start = '', end = ''): { sql: string; args
 // --------------------------------------------------------------------------- //
 // 招聘信息
 // --------------------------------------------------------------------------- //
-export async function countRecruit(db: any, keyword = ''): Promise<number> {
-  const { sql, args } = whereClause(keyword);
+export async function countRecruit(db: any, keyword = '', start = '', end = ''): Promise<number> {
+  const { sql, args } = whereClause(keyword, start, end);
   const row = await db.prepare(`SELECT COUNT(*) AS n FROM recruit${sql}`).bind(...args).first();
   return Number(row?.n ?? 0);
 }
 
-export async function listRecruit(db: any, keyword = '', page = 1, perPage = 15) {
-  const { sql, args } = whereClause(keyword);
+export async function listRecruit(
+  db: any, keyword = '', page = 1, perPage = 15, start = '', end = '',
+) {
+  const { sql, args } = whereClause(keyword, start, end);
   const offset = (page - 1) * perPage;
   const res = await db
     .prepare(`SELECT * FROM recruit${sql} ORDER BY id DESC LIMIT ? OFFSET ?`)
@@ -251,4 +253,109 @@ export async function writeAudit(
 export async function listAudit(db: any, limit = 300) {
   const res = await db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT ?').bind(limit).all();
   return res.results ?? [];
+}
+
+// --------------------------------------------------------------------------- //
+// 整库备份（管理员）
+// --------------------------------------------------------------------------- //
+const DUMP_PAGE = 1000;          // 每次取 1000 行，避免单条查询过大
+const DUMP_MAX_ROWS = 5000;      // 单表上限，超出会截断并在 SQL 里注明
+const DUMP_MAX_BYTES = 8 << 20;  // 整个文件上限 8MB，防止 Worker 内存/超时
+
+function sqlLiteral(v: any): string {
+  if (v === null || v === undefined) return 'NULL';
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';
+  if (typeof v === 'boolean') return v ? '1' : '0';
+  if (v instanceof ArrayBuffer) {
+    return "X'" + Array.from(new Uint8Array(v)).map((b) => b.toString(16).padStart(2, '0')).join('') + "'";
+  }
+  if (ArrayBuffer.isView(v)) {
+    const u8 = new Uint8Array((v as any).buffer, (v as any).byteOffset, (v as any).byteLength);
+    return "X'" + Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join('') + "'";
+  }
+  return "'" + String(v).replace(/'/g, "''") + "'";
+}
+
+export interface DumpResult {
+  sql: string;
+  bytes: number;
+  truncated: string[];   // 被截断的表名
+}
+
+/**
+ * 把 D1 整库导成可重放的 SQL（表结构 + 索引 + 数据）。
+ * 恢复：wrangler d1 execute <库名> --remote --file=备份.sql
+ */
+export async function dumpSql(db: any): Promise<DumpResult> {
+  const out: string[] = [];
+  const truncated: string[] = [];
+  let size = 0;
+  const push = (line: string) => {
+    out.push(line);
+    size += line.length + 1;
+  };
+
+  push('-- 招聘信息管理系统 · D1 整库备份');
+  push(`-- 生成时间：${nowLocal()}`);
+  push('-- 恢复：wrangler d1 execute <库名> --remote --file=本文件.sql');
+  push('-- 安全提示：本文件含 users 表的密码哈希，请妥善保管，不要外传');
+  push('');
+  push('PRAGMA foreign_keys=OFF;');
+  push('BEGIN TRANSACTION;');
+  push('');
+
+  // sqlite_master 里排除 SQLite 内部表与 D1 自己的 _cf_KV / d1_migrations
+  const master = await db.prepare(
+    "SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL "
+    + "AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' "
+    + "AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' "
+    + "AND name NOT LIKE 'd1\\_%' ESCAPE '\\' "
+    + "ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name",
+  ).all();
+  const objs: any[] = master.results ?? [];
+  const tables = objs.filter((o) => o.type === 'table');
+  const others = objs.filter((o) => o.type !== 'table');
+
+  for (const t of tables) push(`${t.sql};`);
+  push('');
+
+  for (const t of tables) {
+    const name = String(t.name);
+    let offset = 0;
+    let cols: string[] = [];
+    let got = 0;
+    for (;;) {
+      const res = await db
+        .prepare(`SELECT * FROM "${name}" ORDER BY rowid LIMIT ? OFFSET ?`)
+        .bind(DUMP_PAGE, offset).all();
+      const rows: any[] = res.results ?? [];
+      if (!rows.length) break;
+      if (!cols.length) cols = Object.keys(rows[0]);
+      const colSql = cols.map((c) => `"${c}"`).join(',');
+      for (const r of rows) {
+        push(`INSERT INTO "${name}" (${colSql}) VALUES (${cols.map((c) => sqlLiteral(r[c])).join(',')});`);
+      }
+      got += rows.length;
+      offset += rows.length;
+      if (rows.length < DUMP_PAGE) break;
+      if (got >= DUMP_MAX_ROWS) {
+        truncated.push(name);
+        push(`-- 注意：表 ${name} 超过 ${DUMP_MAX_ROWS} 行，本备份已截断`);
+        break;
+      }
+      if (size > DUMP_MAX_BYTES) {
+        truncated.push(name);
+        push(`-- 注意：备份已达 ${Math.round(DUMP_MAX_BYTES / 1048576)}MB 上限，表 ${name} 之后的数据未导出`);
+        break;
+      }
+    }
+  }
+
+  push('');
+  for (const o of others) push(`${o.sql};`);
+  push('COMMIT;');
+  push('');
+
+  const sql = out.join('\n');
+  return { sql, bytes: new TextEncoder().encode(sql).byteLength, truncated };
 }

@@ -217,10 +217,21 @@ form.inline button { font-family: inherit; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 18px;
 }
-.pager-info { color: var(--muted); font-size: 13px; }
+.pager-info { color: var(--muted); font-size: 13px; margin-left: 4px; }
+.pager-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 30px; height: 28px; padding: 0 7px;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: #fff; color: var(--text); font-size: 13px; text-decoration: none;
+}
+.pager-num:hover { border-color: #9db4dd; color: #2f5597; }
+.pager-num.on {
+  background: #2f5597; border-color: #2f5597; color: #fff; font-weight: 600;
+}
 
 /* ---------------- 卡片 / 表单 ---------------- */
 .card {
@@ -482,6 +493,36 @@ form.inline button { font-family: inherit; }
 }
 .datebar-f input:focus { border-color: #9db4dd; box-shadow: 0 0 0 3px rgba(47, 85, 151, .1); }
 .datebar-hint { font-size: 12px; color: var(--muted); }
+
+/* ---- 每页条数下拉 ---- */
+.datebar-f select {
+  height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px;
+  background: #fff; font-family: inherit; font-size: 12.5px; color: var(--text); outline: none;
+}
+.datebar-f select:focus { border-color: #9db4dd; box-shadow: 0 0 0 3px rgba(47, 85, 151, .1); }
+
+/* ---- 微信发布 ---- */
+.wx-tools {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 14px; padding: 10px 14px;
+  background: #f7f9fd; border: 1px solid var(--line); border-radius: 10px;
+}
+.wx-tip { font-size: 12.5px; color: var(--muted); }
+.wx-tip.ok { color: #1f7a45; }
+.wx-tip.err { color: #b3341f; }
+.wx-card { margin-bottom: 16px; }
+.wx-preview {
+  max-width: 430px; margin: 0 auto; padding: 18px 16px;
+  background: #fff; border: 1px solid #eceff4; border-radius: 10px;
+}
+.wx-code-card { margin-bottom: 24px; }
+.wx-code-card summary { cursor: pointer; font-weight: 600; font-size: 14px; color: #3d4658; }
+.wx-code {
+  width: 100%; height: 300px; margin-top: 12px; padding: 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fafbfc;
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 12px; line-height: 1.6; color: #3d4658; resize: vertical;
+}
 
 /* ---- 勾选导出：选择条 + 行内复选框 ---- */
 .selbar {

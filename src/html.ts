@@ -38,6 +38,8 @@ export interface LayoutOpts {
   allowRegister?: boolean;
   flashes?: [string, string][];
   active?: string;
+  /** 单篇微信发布最多条数（选择条上的提示用） */
+  maxWechat?: number;
 }
 
 export function layout(o: LayoutOpts, body: string): string {
@@ -97,9 +99,20 @@ export function layout(o: LayoutOpts, body: string): string {
 // --------------------------------------------------------------------------- //
 export function indexPage(o: LayoutOpts & {
   rows: any[]; q: string; page: number; pages: number; total: number;
+  per: number; perChoices: number[]; pageNums: number[];
+  start: string; end: string; filtered: boolean;
 }): string {
-  const { rows, q, page, pages, total, user } = o;
-  const searchUrl = (p: number) => `/${qs({ q: q || undefined, page: p > 1 ? p : undefined })}`;
+  const { rows, q, page, pages, total, user, per, start, end, filtered } = o;
+  const defaultPer = o.perChoices[0] || 15;
+
+  // 列表页链接：带上关键词、日期区间与每页条数（page=1、per=默认值时省略）
+  const listUrl = (p: number) => `/${qs({
+    q: q || undefined,
+    start: start || undefined,
+    end: end || undefined,
+    per: per === defaultPer ? undefined : per,
+    page: p > 1 ? p : undefined,
+  })}`;
 
   const tableRows = rows.map((r) => `
     <tr>
@@ -120,25 +133,32 @@ export function indexPage(o: LayoutOpts & {
         <form method="post" action="/delete/${r.id}" class="inline"
               onsubmit="return confirm('确定删除编号 ${r.id}「${h(r.company_name)} - ${h(r.position)}」吗？此操作不可恢复。');">
           <input type="hidden" name="_csrf" value="${h(o.csrf)}">
-          <input type="hidden" name="back" value="${h(searchUrl(page))}">
+          <input type="hidden" name="back" value="${h(listUrl(page))}">
           <button class="btn btn-xs btn-danger" type="submit">删除</button>
         </form>`
         : `<a class="btn btn-xs btn-ghost" href="/login?next=${encodeURIComponent(`/edit/${r.id}`)}" title="编辑与删除需登录">🔒 编辑</a>`}
       </td>
     </tr>`).join('');
 
-  const pager = pages > 1 ? `
+  const pager = `
     <div class="pager">
-      ${page > 1 ? `<a class="btn btn-xs" href="${searchUrl(page - 1)}">上一页</a>` : ''}
-      <span class="pager-info">第 ${page} / ${pages} 页</span>
-      ${page < pages ? `<a class="btn btn-xs" href="${searchUrl(page + 1)}">下一页</a>` : ''}
-    </div>` : '';
+      ${page > 1 ? `<a class="btn btn-xs" href="${listUrl(1)}">首页</a>
+      <a class="btn btn-xs" href="${listUrl(page - 1)}">上一页</a>` : ''}
+      ${o.pageNums.map((n) => (n === page
+        ? `<span class="pager-num on" aria-current="page">${n}</span>`
+        : `<a class="pager-num" href="${listUrl(n)}">${n}</a>`)).join('')}
+      ${page < pages ? `<a class="btn btn-xs" href="${listUrl(page + 1)}">下一页</a>
+      <a class="btn btn-xs" href="${listUrl(pages)}">末页</a>` : ''}
+      <span class="pager-info">第 ${page} / ${pages} 页 · 每页 ${per} 条 · 共 ${total} 条</span>
+    </div>`;
 
   const empty = `
     <div class="empty">
       <div class="empty-icon">📄</div>
-      <h3>${q ? `没有匹配「${h(q)}」的招聘信息` : '还没有招聘信息'}</h3>
-      <p>可以手动新增一条，或从 Excel 批量导入已有招聘数据。</p>
+      <h3>${filtered ? '没有符合条件的招聘信息' : '还没有招聘信息'}</h3>
+      <p>${filtered
+        ? '换个关键词或调整日期区间试试，也可以<a href="/">清除筛选</a>查看全部。'
+        : '可以手动新增一条，或从 Excel 批量导入已有招聘数据。'}</p>
       <div class="empty-actions">
         <a class="btn btn-primary" href="/add">新增招聘信息</a>
         <a class="btn" href="/import">从 Excel 导入</a>
@@ -149,7 +169,7 @@ export function indexPage(o: LayoutOpts & {
     <div class="notice">
       <span class="notice-ic">🔒</span>
       <div><b>当前为访客浏览模式。</b>招聘列表、打印预览与单条 Word 简章可自由使用；
-      新增 / 编辑 / 删除、导入 Excel、导出 Excel、批量生成 Word、按日期导出需登录后操作。</div>
+      新增 / 编辑 / 删除、导入 Excel、导出 Excel、批量生成 Word、按日期导出、微信发布需登录后操作。</div>
       <a class="btn btn-xs btn-primary" href="/login">登录</a>
     </div>` : '';
 
@@ -157,24 +177,29 @@ export function indexPage(o: LayoutOpts & {
   <form id="selForm" method="post" action="/docx/selected" class="selbar">
     <input type="hidden" name="_csrf" value="${h(o.csrf)}">
     <span class="selbar-count">已选 <b id="selCount">0</b> 条</span>
-    <button class="btn btn-primary btn-xs" id="selBtn" type="submit" disabled>📄 导出选定为 Word（单文件）</button>
-    <span class="selbar-hint">勾选多条后导出到同一个 Word 文件，每条占一页，适合一次打印多张</span>
+    <button class="btn btn-primary btn-xs sel-act" type="submit" disabled>📄 导出选定为 Word（单文件）</button>
+    <button class="btn btn-soft btn-xs sel-act" type="submit" disabled
+            formaction="/wechat/selected">💬 导出微信发布 HTML</button>
+    <span class="selbar-hint">Word：每条一页合并成一个文件；微信：生成可直接粘贴到公众号编辑器的排版（每篇最多 ${o.maxWechat || 30} 条）</span>
   </form>` : '';
 
   const pickScript = user ? `
 <script>
 (function () {
+  var perSel = document.getElementById('perSel');
+  if (perSel) perSel.addEventListener('change', function () { perSel.form.submit(); });
+
   var form = document.getElementById('selForm');
   if (!form) return;
   var boxes = Array.prototype.slice.call(document.querySelectorAll('.pick-box'));
   var all = document.getElementById('pickAll');
   var counter = document.getElementById('selCount');
-  var btn = document.getElementById('selBtn');
+  var btns = Array.prototype.slice.call(document.querySelectorAll('.sel-act'));
   function picked() { return boxes.filter(function (b) { return b.checked; }); }
   function sync() {
     var n = picked().length;
     counter.textContent = n;
-    btn.disabled = n === 0;
+    btns.forEach(function (b) { b.disabled = n === 0; });
     if (all) {
       all.checked = n > 0 && n === boxes.length;
       all.indeterminate = n > 0 && n < boxes.length;
@@ -194,7 +219,9 @@ export function indexPage(o: LayoutOpts & {
   <div class="page-head">
     <div>
       <h1>招聘信息列表</h1>
-      <p class="sub">共 <b>${total}</b> 条招聘信息${q ? `（关键词：${h(q)}）` : ''}，每条可直接生成单页 Word 简章打印</p>
+      <p class="sub">共 <b>${total}</b> 条招聘信息${
+  q ? `（关键词：${h(q)}）` : ''}${
+  start || end ? `（日期：${start || '不限'} ~ ${end || '不限'}）` : ''}，每条可直接生成单页 Word 简章打印</p>
     </div>
     <div class="head-actions"><a class="btn btn-primary" href="/add">+ 新增招聘信息</a></div>
   </div>
@@ -202,8 +229,11 @@ export function indexPage(o: LayoutOpts & {
   <div class="toolbar">
     <form class="search" method="get" action="/">
       <input type="text" name="q" value="${h(q)}" placeholder="搜索单位名称 / 岗位 / 地址 / 电话…">
+      ${start ? `<input type="hidden" name="start" value="${h(start)}">` : ''}
+      ${end ? `<input type="hidden" name="end" value="${h(end)}">` : ''}
+      <input type="hidden" name="per" value="${per}">
       <button class="btn" type="submit">搜索</button>
-      ${q ? '<a class="btn btn-ghost" href="/">清除</a>' : ''}
+      ${filtered ? '<a class="btn btn-ghost" href="/">清除筛选</a>' : ''}
     </form>
     <div class="tool-actions">
       <a class="btn btn-soft" href="/docx/zip${qs({ q: q || undefined })}">📦 批量生成 Word（ZIP）</a>
@@ -211,14 +241,20 @@ export function indexPage(o: LayoutOpts & {
     </div>
   </div>
 
-  <form class="datebar" method="get" action="/export/excel">
+  <form class="datebar" method="get" action="/">
     ${q ? `<input type="hidden" name="q" value="${h(q)}">` : ''}
-    <span class="datebar-title">按日期导出</span>
-    <label class="datebar-f">起始 <input type="date" name="start" aria-label="起始日期"></label>
-    <label class="datebar-f">结束 <input type="date" name="end" aria-label="结束日期"></label>
-    <button class="btn btn-soft" type="submit">⬇ 导出 Excel</button>
+    <span class="datebar-title">筛选 / 导出</span>
+    <label class="datebar-f">起始 <input type="date" name="start" value="${h(start)}" aria-label="起始日期"></label>
+    <label class="datebar-f">结束 <input type="date" name="end" value="${h(end)}" aria-label="结束日期"></label>
+    <label class="datebar-f">每页
+      <select name="per" id="perSel" aria-label="每页条数">
+        ${o.perChoices.map((n) => `<option value="${n}"${n === per ? ' selected' : ''}>${n} 条</option>`).join('')}
+      </select>
+    </label>
+    <button class="btn btn-soft" type="submit">🔍 筛选</button>
+    <button class="btn btn-soft" type="submit" formaction="/export/excel">⬇ 导出 Excel</button>
     <button class="btn btn-soft" type="submit" formaction="/docx/range">📄 导出 Word（每条一页）</button>
-    <span class="datebar-hint">日期留空 = 导出全部；Word 会把范围内每条各排一页，合并成一个文件</span>
+    <span class="datebar-hint">日期留空 = 全部；筛选同时作用于列表与导出</span>
   </form>
   ${selbar}
   ${notice}
@@ -232,6 +268,125 @@ export function indexPage(o: LayoutOpts & {
     </tr></thead>
     <tbody>${tableRows}</tbody>
   </table></div>${pager}` : empty}${pickScript}`;
+
+  return layout(o, body);
+}
+
+// --------------------------------------------------------------------------- //
+// 微信发布（生成可粘贴到公众号的 HTML）
+// --------------------------------------------------------------------------- //
+export function wechatPage(o: LayoutOpts & {
+  htmlCode: string; count: number; downloadName: string;
+}): string {
+  const body = `
+  <div class="page-head">
+    <div>
+      <h1>微信发布 HTML</h1>
+      <p class="sub">已生成 <b>${o.count}</b> 条招聘信息的公众号排版，可直接粘贴到公众号编辑器</p>
+    </div>
+    <div class="head-actions"><a class="btn" href="/">返回列表</a></div>
+  </div>
+
+  <div class="notice">
+    <span class="notice-ic">💡</span>
+    <div><b>三种用法：</b>① 点「复制到公众号」，在公众号编辑器正文里 <b>Ctrl+V</b> 粘贴，排版会保留；
+    ② 点「复制 HTML 源码」，粘到需要源码的地方；③ 点「下载 .html」保存到本地，双击即可预览。
+    <br>公众号不接受外部图片链接，二维码 / 图片请在编辑器里手动插入。</div>
+  </div>
+
+  <div class="wx-tools">
+    <button class="btn btn-primary" id="btnRich" type="button">📋 复制到公众号</button>
+    <button class="btn btn-soft" id="btnCode" type="button">🧾 复制 HTML 源码</button>
+    <button class="btn btn-soft" id="btnDownload" type="button">⬇ 下载 .html</button>
+    <span class="wx-tip" id="wxTip">复制后到公众号编辑器正文里粘贴即可</span>
+  </div>
+
+  <div class="card wx-card">
+    <h3 class="card-title">效果预览（手机宽度）</h3>
+    <div class="wx-preview" id="wxPreview">
+${o.htmlCode}
+    </div>
+  </div>
+
+  <details class="card wx-code-card">
+    <summary>查看 HTML 源码（${o.htmlCode.length} 字符）</summary>
+    <textarea id="wxCode" class="wx-code" readonly spellcheck="false">${h(o.htmlCode)}</textarea>
+  </details>
+
+<script>
+(function () {
+  var codeEl = document.getElementById('wxCode');
+  var preview = document.getElementById('wxPreview');
+  var tip = document.getElementById('wxTip');
+  var NAME = ${JSON.stringify(o.downloadName)};
+
+  function say(msg, ok) {
+    tip.textContent = msg;
+    tip.className = 'wx-tip' + (ok ? ' ok' : ' err');
+    setTimeout(function () { tip.className = 'wx-tip'; }, 6000);
+  }
+
+  function selectNode(node) {
+    var range = document.createRange();
+    range.selectNodeContents(node);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  document.getElementById('btnRich').addEventListener('click', function () {
+    var code = codeEl.value;
+    if (navigator.clipboard && window.ClipboardItem) {
+      var item = new ClipboardItem({
+        'text/html': new Blob([code], { type: 'text/html' }),
+        'text/plain': new Blob([preview.innerText], { type: 'text/plain' })
+      });
+      navigator.clipboard.write([item]).then(function () {
+        say('已复制富文本，去公众号编辑器里 Ctrl+V 粘贴即可', true);
+      }).catch(function () {
+        selectNode(preview);
+        say('浏览器拦截了自动复制，已选中预览内容，请按 Ctrl+C', false);
+      });
+    } else {
+      selectNode(preview);
+      say('当前浏览器不支持自动复制，已选中预览内容，请按 Ctrl+C', false);
+    }
+  });
+
+  document.getElementById('btnCode').addEventListener('click', function () {
+    codeEl.select();
+    codeEl.setSelectionRange(0, codeEl.value.length);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(codeEl.value).then(function () {
+        say('HTML 源码已复制到剪贴板', true);
+      }).catch(function () {
+        document.execCommand('copy');
+        say('已复制 HTML 源码', true);
+      });
+    } else {
+      document.execCommand('copy');
+      say('已复制 HTML 源码', true);
+    }
+  });
+
+  document.getElementById('btnDownload').addEventListener('click', function () {
+    var doc = '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+      + '<title>微信发布</title>\n</head>\n'
+      + '<body style="margin:0;padding:20px 16px;background:#fff;">\n'
+      + codeEl.value + '\n</body>\n</html>\n';
+    var blob = new Blob([doc], { type: 'text/html;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = NAME;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+    say('已开始下载 ' + NAME, true);
+  });
+})();
+</script>`;
 
   return layout(o, body);
 }
