@@ -7,7 +7,7 @@
  * 路由：
  *   公开：/  /preview/:id  /docx/:id  /qr.jpg  /login  /register
  *   需登录：/add /edit/:id /delete/:id /import /export/excel /docx/zip /docx/range
- *           /docx/selected /wechat/selected /template.xlsx /password
+ *           /docx/selected /wechat/selected /live /template.xlsx /password
  *   需管理员：/users /users/:id/action /audit /backup.sql
  */
 import { zipSync } from 'fflate';
@@ -17,8 +17,9 @@ import * as pages from './html';
 import { buildDocx, buildDocxMulti, qrBytes } from './docx';
 import { exportXlsx, buildTemplate } from './xlsx';
 import { parseImport } from './xlsx-import';
-import { FIELD_NAMES, dateRange, docFilename, multiDocFilename, normStatus, nowLocal, prepare,
-  rangeDocFilename, rangeLabel, rangeXlsxFilename, todayIso, toIsoDate } from './format';
+import { FIELD_NAMES, STATUS_LABELS, dateRange, docFilename, effStatus, multiDocFilename, normStatus,
+  nowLocal, prepare, rangeDocFilename, rangeLabel, rangeXlsxFilename, todayIso,
+  toIsoDate } from './format';
 import { buildWechatVariants, WECHAT_THEMES } from './wechat';
 import { CSS } from './css';
 
@@ -29,6 +30,9 @@ const MAX_REG_PER_HOUR = 5;
 const MAX_SELECTED = 200;         // 单次「导出选定为 Word」最大条数
 const MAX_RANGE = 300;            // 单次「按日期导出 Word」最大条数
 const MAX_WECHAT = 30;            // 单次「复制微信发布」最大条数（一篇推文不宜过长）
+const MAX_LIVE = 30;              // 单次「直播轮播」最大条数
+const LIVE_INTERVALS = [3, 5, 8, 10, 15, 20, 30, 45, 60];   // 直播页可选的切换间隔（秒）
+const LIVE_DEFAULT_INTERVAL = 8;
 const PER_CHOICES = [15, 30, 50, 100];   // 列表页可选的每页条数
 const DEFAULT_SITE_NAME = '招聘信息管理系统';   // SITE_NAME 未配置时的默认站名
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -98,7 +102,7 @@ function layoutOpts(c: Ctx, title: string, active?: string): pages.LayoutOpts {
     siteName,
     csrf: c.csrf, user: c.user, isAdmin: c.isAdmin,
     pendingCount: c.pending, allowRegister: c.allowRegister,
-    flashes: c.flashes, active, maxWechat: MAX_WECHAT,
+    flashes: c.flashes, active, maxWechat: MAX_WECHAT, maxLive: MAX_LIVE,
   };
 }
 
@@ -243,7 +247,7 @@ async function route(c: Ctx): Promise<Response> {
   // ---- 需要登录 ----
   const needLogin = [
     '/add', '/import', '/export/excel', '/docx/zip', '/docx/range', '/docx/selected',
-    '/wechat/selected', '/template.xlsx', '/password', '/backup.sql',
+    '/wechat/selected', '/live', '/template.xlsx', '/password', '/backup.sql',
   ];
   const isProtected = needLogin.includes(pathname)
     || /^\/edit\/\d+$/.test(pathname) || /^\/delete\/\d+$/.test(pathname)
@@ -279,6 +283,9 @@ async function route(c: Ctx): Promise<Response> {
   }
   if (pathname === '/wechat/selected') {
     return method === 'POST' ? handleWechatSelected(c, form!) : redirect(c, '/');
+  }
+  if (pathname === '/live') {
+    return handleLive(c, method === 'POST' ? form! : null);
   }
   if (pathname === '/backup.sql') return handleBackup(c);
 
@@ -686,6 +693,94 @@ async function handleWechatSelected(c: Ctx, form: FormData): Promise<Response> {
     ...layoutOpts(c, '微信发布 · 招聘信息管理系统'),
     variants, themes: WECHAT_THEMES, count: rows.length,
     downloadName: `招聘微信发布_${stamp}_${rows.length}条.html`,
+  }));
+}
+
+/**
+ * 从查询串里取编号：支持 ?ids=1&ids=2 与 ?ids=1,2,3 两种写法（去重、保序、丢弃非法值）。
+ */
+function queryIds(u: URL): number[] {
+  const ids: number[] = [];
+  for (const raw of u.searchParams.getAll('ids')) {
+    for (const part of String(raw).replace(/，/g, ',').split(',')) {
+      const n = Number(part.trim());
+      if (Number.isInteger(n) && n > 0 && !ids.includes(n)) ids.push(n);
+    }
+  }
+  return ids;
+}
+
+/** 切换间隔：只接受预设值，认不出就退回默认 8 秒 */
+function pickInterval(raw: unknown): number {
+  const n = Number(String(raw ?? '').trim());
+  return LIVE_INTERVALS.includes(n) ? n : LIVE_DEFAULT_INTERVAL;
+}
+
+/** 直播页用的精简数据：状态算成实际值，岗位要求按行拆开 */
+function liveItems(rows: any[]): pages.LiveItem[] {
+  const today = todayIso();
+  return rows.map((r: any) => {
+    const g = (k: string) => (r?.[k] === null || r?.[k] === undefined ? '' : String(r[k])).trim();
+    const st = String(r.eff_status || effStatus(r, today));
+    const lines = g('requirements').split(/\r?\n/)
+      .map((s) => s.trim().replace(/^[·•\-—　\s]+/, ''))
+      .filter(Boolean);
+    return {
+      id: Number(r.id) || 0,
+      company: g('company_name'),
+      position: g('position'),
+      headcount: g('headcount'),
+      salary: g('salary') || '面议',
+      address: g('address'),
+      phone: g('phone'),
+      reqLines: lines,
+      statusKey: st,
+      statusLabel: STATUS_LABELS[st] || '招聘中',
+    };
+  });
+}
+
+/**
+ * 直播轮播页（需登录）：勾选的招聘信息在手机上按设定间隔循环播放。
+ * 入口是列表页的「📺 直播轮播」按钮（POST），拿到 ids 后 302 到 GET 版本，
+ * 这样地址栏里的 ?ids=1,2,3&interval=8 可以直接收藏 / 换手机打开。
+ */
+async function handleLive(c: Ctx, form: FormData | null): Promise<Response> {
+  if (c.req.method === 'POST') {
+    const ids = collectIds(form!);
+    if (!ids.length) {
+      await flash(c, 'error', '请先勾选要直播轮播的招聘信息');
+      return redirect(c, '/');
+    }
+    if (ids.length > MAX_LIVE) {
+      await flash(c, 'error', `一次最多轮播 ${MAX_LIVE} 条，请分批勾选（当前 ${ids.length} 条）`);
+      return redirect(c, '/');
+    }
+    const iv = pickInterval(form!.get('interval'));
+    return redirect(c, `/live?ids=${ids.join(',')}&interval=${iv}`);
+  }
+
+  const ids = queryIds(c.url);
+  if (!ids.length) {
+    await flash(c, 'error', '请先在列表里勾选招聘信息，再点「直播轮播」');
+    return redirect(c, '/');
+  }
+  if (ids.length > MAX_LIVE) {
+    await flash(c, 'error', `一次最多轮播 ${MAX_LIVE} 条，请分批勾选（当前 ${ids.length} 条）`);
+    return redirect(c, '/');
+  }
+
+  const rows = await db.getRecruitsByIds(c.env.DB, ids);
+  if (!rows.length) {
+    await flash(c, 'error', '勾选的招聘信息已不存在，请刷新页面后重试');
+    return redirect(c, '/');
+  }
+
+  const interval = pickInterval(c.url.searchParams.get('interval'));
+  await audit(c, '直播轮播',
+    `共 ${rows.length} 条，间隔 ${interval} 秒（编号 ${rows.map((r: any) => r.id).join(',')}）`);
+  return htmlRes(c, pages.livePage({
+    items: liveItems(rows), interval, choices: LIVE_INTERVALS, backUrl: '/',
   }));
 }
 

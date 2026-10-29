@@ -527,8 +527,8 @@ check("测试数据已清理", "没有符合条件的招聘信息" in lafter)
 print("[5.8] 复制到公众号（微信排版 + 4 套配色）")
 _, lst, _ = reg.get("/")
 check("选择条有微信发布按钮", "/wechat/selected" in lst and "微信发布" in lst)
-check("选择条有两个导出按钮", lst.count('class="btn btn-primary btn-xs sel-act"')
-      + lst.count('class="btn btn-soft btn-xs sel-act"') == 2)
+check("选择条有三个动作按钮", lst.count('class="btn btn-primary btn-xs sel-act"')
+      + lst.count('class="btn btn-soft btn-xs sel-act"') == 3)
 
 st, wx, _ = reg.post("/wechat/selected", {"_csrf": sel_token, "ids": [str(RID), str(rid)]})
 check("微信发布 200", st == 200, st)
@@ -568,6 +568,83 @@ st, _, _ = reg.post("/wechat/selected",
 check("超过 30 条被拦", st == 302, st)
 st, _, _ = S().post("/wechat/selected", {"ids": [str(RID)]})
 check("匿名不能导出微信", st in (302, 400), st)
+
+# ---------- 5.8b 直播轮播（手机全屏循环播放） ----------
+print("[5.8b] 直播轮播（手机全屏循环播放）")
+_, lst, _ = reg.get("/")
+check("选择条有直播轮播按钮", 'formaction="/live"' in lst and "直播轮播" in lst)
+check("选择条提示含直播", "手机全屏循环播放" in lst)
+
+# 造一条带序号的岗位要求，验证「已带序号的行不再额外画圆点」
+st, _, _ = reg.post("/add", {
+    "_csrf": csrf(reg, "/add"), "company_name": "直播测试公司", "position": "主播助理",
+    "headcount": "2", "salary": "6000-8000", "address": "直播路 9 号",
+    "phone": "13500002222", "requirements": "1. 口齿清晰；\n2. 能上晚班；\n· 有经验优先",
+})
+check("新增直播测试记录", st == 302, st)
+_, ll, _ = reg.get("/?q=" + urllib.parse.quote("直播测试"))
+m = re.search(r'data-id="(\d+)"', ll)
+lid = int(m.group(1)) if m else None
+check("拿到直播测试记录 id", lid is not None, lid)
+
+ltok = csrf(reg, "/")
+st, _, hd = reg.post("/live", {"_csrf": ltok, "ids": [str(RID), str(lid)]})
+loc = hd.get("Location", "")
+check("直播 POST 302", st == 302, st)
+check("跳到 GET 直播页", "/live?ids=" in loc and "interval=8" in loc, loc)
+check("ids 逗号连接且保持勾选顺序",
+      loc.split("ids=")[-1].split("&")[0] in (f"{RID},{lid}", f"{RID}%2C{lid}"), loc)
+
+st, live, _ = reg.get(loc)
+check("直播页 200", st == 200, st)
+check("直播页是独立整页", 'id="stage"' in live and 'href="/add"' not in live)
+check("直播页两条幻灯片", live.count('<section class="slide"') == 2,
+      live.count('<section class="slide"'))
+check("幻灯片按顺序编号", 'data-i="0"' in live and 'data-i="1"' in live)
+check("含单位名", "直播测试公司" in live)
+check("含岗位名", "主播助理" in live)
+check("含薪资", "6000-8000" in live)
+check("含招聘数", "招 2 人" in live)
+check("含状态徽标", 'class="badge s-active"' in live)
+check("含地址", "直播路 9 号" in live)
+check("含电话", "13500002222" in live)
+check("岗位要求按行拆分", live.count("<li") >= 3, live.count("<li"))
+check("已带序号的行不画圆点", 'class="no-dot"' in live)
+check("行首的 · 被去掉", ">有经验优先</li>" in live)
+check("默认间隔 8 秒", '<option value="8" selected>' in live)
+check("间隔选项 9 个", live.count("<option value=") == 9, live.count("<option value="))
+check("含总数与当前序号", 'id="total">2<' in live and 'id="cur">1<' in live)
+check("含进度条", 'id="bar"' in live)
+check("含暂停/上下条/全屏", all(f'id="{x}"' in live for x in ("play", "prev", "next", "fs")))
+check("含屏幕常亮逻辑", "wakeLock" in live)
+check("含控件自动隐藏", "body.idle" in live)
+check("含桌面 9:16 预览", "min-aspect-ratio: 3/4" in live)
+
+st, live10, _ = reg.get(f"/live?ids={RID}&interval=10")
+check("指定间隔 10 秒生效", '<option value="10" selected>' in live10)
+st, livebad, _ = reg.get(f"/live?ids={RID}&interval=7")
+check("非法间隔回退 8 秒", '<option value="8" selected>' in livebad)
+st, livecomma, _ = reg.get(f"/live?ids={RID},{lid}&interval=5")
+check("逗号写法也认", livecomma.count('<section class="slide"') == 2)
+st, livearr, _ = reg.get(f"/live?ids={RID}&ids={lid}")
+check("重复参数写法也认", livearr.count('<section class="slide"') == 2)
+
+st, _, hd = reg.post("/live", {"_csrf": ltok})
+check("未勾选跳回列表", st == 302 and hd.get("Location", "") == "/", st)
+st, _, _ = reg.post("/live", {"_csrf": ltok, "ids": [str(i) for i in range(1, 32)]})
+check("超过 30 条被拦", st == 302, st)
+st, _, _ = reg.get("/live")
+check("无 ids 跳回列表", st == 302, st)
+st, _, hd = S().get(f"/live?ids={RID}")
+check("匿名不能看直播页", st == 302 and "/login" in hd.get("Location", ""), st)
+st, _, _ = reg.get("/live?ids=999999")
+check("记录不存在跳回列表", st == 302, st)
+
+# 清理本节数据
+if lid:
+    reg.post(f"/delete/{lid}", {"_csrf": csrf(reg, "/"), "back": "/"})
+_, lafter2, _ = reg.get("/?q=" + urllib.parse.quote("直播测试"))
+check("直播测试数据已清理", "直播测试公司" not in lafter2)
 
 # ---------- 5.9 数据库备份 ----------
 print("[5.9] 管理员备份数据库为 SQL")
@@ -675,7 +752,7 @@ check("导入测试数据已清理", "导入空状态公司" not in iclean)
 # ---------- 9. 审计 ----------
 print("[9] 审计日志")
 _, au, _ = adm.get("/audit")
-for act in ("登录", "注册申请", "审批通过", "停用账号", "启用账号", "新增", "修改", "删除", "导出 Excel"):
+for act in ("登录", "注册申请", "审批通过", "停用账号", "启用账号", "新增", "修改", "删除", "导出 Excel", "直播轮播"):
     check(f"日志含「{act}」", act in au)
 
 # ---------- 10. 退出 ----------

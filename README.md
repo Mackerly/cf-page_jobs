@@ -319,6 +319,7 @@ Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态
 | GET | `/docx/range?start=&end=&show_full=&show_expired=` | 登录 | 按发布日期区间导出，范围内每条一页合并成一个 Word |
 | POST | `/docx/selected` | 登录 | 勾选的多条合并为一个 Word（每条一页） |
 | POST | `/wechat/selected` | 登录 | 勾选的多条生成公众号可粘贴的 HTML（单篇最多 30 条） |
+| GET/POST | `/live?ids=&interval=` | 登录 | 直播轮播：勾选的多条在手机全屏按间隔循环播放（单次最多 30 条） |
 | GET | `/backup.sql` | 管理员 | 整库 SQL 备份（表结构 + 索引 + 数据） |
 | GET | `/users` | 管理员 | 账号管理 |
 | POST | `/users/:id/action` | 管理员 | 审批/停用/启用/改角色/重置密码/删除 |

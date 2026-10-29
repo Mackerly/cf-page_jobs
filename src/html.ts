@@ -51,6 +51,8 @@ export interface LayoutOpts {
   active?: string;
   /** 单篇微信发布最多条数（选择条上的提示用） */
   maxWechat?: number;
+  /** 单次直播轮播最多条数（选择条上的提示用） */
+  maxLive?: number;
 }
 
 export function layout(o: LayoutOpts, body: string): string {
@@ -208,7 +210,9 @@ export function indexPage(o: LayoutOpts & {
     <button class="btn btn-primary btn-xs sel-act" type="submit" disabled>📄 导出选定为 Word（单文件）</button>
     <button class="btn btn-soft btn-xs sel-act" type="submit" disabled
             formaction="/wechat/selected">📋 复制微信发布</button>
-    <span class="selbar-hint">Word：每条一页合并成一个文件；微信：生成公众号排版，一键复制到剪贴板（每篇最多 ${o.maxWechat || 30} 条）</span>
+    <button class="btn btn-soft btn-xs sel-act" type="submit" disabled
+            formaction="/live">📺 直播轮播</button>
+    <span class="selbar-hint">Word：每条一页合并成一个文件；微信：生成公众号排版，一键复制到剪贴板（每篇最多 ${o.maxWechat || 30} 条）；直播：手机全屏循环播放，可设切换间隔（最多 ${o.maxLive || 30} 条）</span>
   </form>` : '';
 
   const pickScript = user ? `
@@ -322,6 +326,456 @@ export function indexPage(o: LayoutOpts & {
   </table></div>${pager}` : empty}${pickScript}`;
 
   return layout(o, body);
+}
+
+// --------------------------------------------------------------------------- //
+// 直播轮播（手机全屏，按设定间隔循环播放勾选的招聘信息）
+// --------------------------------------------------------------------------- //
+export interface LiveItem {
+  id: number;
+  company: string;
+  position: string;
+  headcount: string;
+  salary: string;
+  address: string;
+  phone: string;
+  reqLines: string[];
+  statusKey: string;
+  statusLabel: string;
+}
+
+/** 岗位要求里本来就带序号的行（1. / 一、 / （1））不再额外画圆点 */
+function hasOwnNumber(line: string): boolean {
+  const c = line.slice(0, 1);
+  return /\d/.test(c) || '一二三四五六七八九十（('.includes(c);
+}
+
+/**
+ * 直播轮播页：整页自包含（不引用站内 CSS / 导航），
+ * 手机上就是一块 100dvh 的暗色舞台，桌面上居中显示 9:16 手机画面。
+ */
+export function livePage(o: {
+  items: LiveItem[]; interval: number; choices: number[]; backUrl?: string;
+}): string {
+  const back = o.backUrl || '/';
+  const slides = o.items.map((it, i) => `
+      <section class="slide" data-i="${i}">
+        <div class="company">${h(it.company)}</div>
+        <h1 class="position">${h(it.position)}</h1>
+        <div class="meta">${
+  it.salary ? `<span class="salary">${h(it.salary)}</span>` : ''}${
+  it.headcount ? `<span class="chip">招 ${h(it.headcount)} 人</span>` : ''}<span class="badge s-${
+  h(it.statusKey)}">${h(it.statusLabel)}</span></div>${
+  it.reqLines.length ? `
+        <div class="req-block">
+          <div class="req-title">岗位要求</div>
+          <ul class="req" data-fit>${it.reqLines.map((ln) =>
+    `<li${hasOwnNumber(ln) ? ' class="no-dot"' : ''}>${h(ln)}</li>`).join('')}</ul>
+        </div>` : ''}${
+  it.address || it.phone ? `
+        <div class="contact">${
+    it.address ? `<div class="row"><span class="ic">📍</span><span>${h(it.address)}</span></div>` : ''}${
+    it.phone ? `<div class="row"><span class="ic">📞</span><span class="phone">${h(it.phone)}</span></div>` : ''}
+        </div>` : ''}
+      </section>`).join('');
+
+  const options = o.choices.map((s) =>
+    `<option value="${s}"${s === o.interval ? ' selected' : ''}>${s} 秒</option>`).join('');
+
+  const body = o.items.length ? `
+    <div class="track" id="track">${slides}
+    </div>` : `
+    <div class="empty">没有可轮播的招聘信息，<a href="${h(back)}">返回列表</a></div>`;
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<meta name="robots" content="noindex">
+<title>直播招聘轮播 · 招聘信息管理系统</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --bg2: #121a30;
+    --fg: #f2f5fb;
+    --dim: #9aa7c2;
+    --line: rgba(255, 255, 255, .12);
+    --brand: #3b82f6;
+    --gold: #ffc247;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --off: #94a3b8;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--fg);
+    font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    overscroll-behavior: none;
+  }
+  .stage {
+    position: relative; height: 100dvh; width: 100%;
+    display: flex; flex-direction: column;
+    background:
+      radial-gradient(120% 80% at 50% -10%, #1b2a4a 0%, transparent 60%),
+      radial-gradient(100% 70% at 50% 110%, #16233d 0%, transparent 55%),
+      var(--bg);
+    overflow: hidden;
+  }
+  /* 桌面/横屏：居中一个 9:16 手机画面，方便预览与投屏 */
+  @media (min-aspect-ratio: 3/4) {
+    body { display: flex; align-items: center; justify-content: center; background: #05070d; }
+    .stage {
+      width: min(100vw, calc(100dvh * 9 / 16));
+      height: 100dvh;
+      border-left: 1px solid rgba(255, 255, 255, .07);
+      border-right: 1px solid rgba(255, 255, 255, .07);
+      box-shadow: 0 0 80px rgba(0, 0, 0, .8);
+    }
+    /* 桌面预览时 vw 取的是整个窗口宽，字号会偏小，改成按高度换算 */
+    .company { font-size: min(20px, 2.3vh); }
+    .position { font-size: min(50px, 5.6vh); }
+    .salary { font-size: min(36px, 4vh); }
+    .chip, .badge { font-size: min(15px, 1.7vh); }
+    .req { font-size: min(19px, 2.2vh); max-height: 36vh; }
+    .row { font-size: min(17px, 2vh); }
+  }
+
+  /* ---------- 顶部状态条 ---------- */
+  .topbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: max(14px, env(safe-area-inset-top, 0px)) 20px 10px;
+    font-size: 13px; color: var(--dim); letter-spacing: .04em;
+    transition: opacity .35s ease;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #ef4444;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, .7);
+    animation: pulse 1.8s infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, .55); }
+    70% { box-shadow: 0 0 0 9px rgba(239, 68, 68, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  }
+  .counter { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .counter b { color: var(--fg); font-size: 15px; }
+
+  /* ---------- 内容区 ---------- */
+  .viewport { flex: 1; overflow: hidden; position: relative; }
+  .track {
+    display: flex; height: 100%;
+    transition: transform .45s cubic-bezier(.22, .61, .36, 1);
+    will-change: transform;
+  }
+  .slide {
+    flex: 0 0 100%; height: 100%;
+    padding: 4px 22px 0;
+    display: flex; flex-direction: column;
+    justify-content: center; gap: 14px;
+    overflow: hidden;
+  }
+  .company {
+    font-size: clamp(15px, 4.6vw, 20px); color: #a9c0e8;
+    font-weight: 600; letter-spacing: .02em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .company::before {
+    content: ""; width: 4px; height: 1.05em; border-radius: 2px;
+    background: linear-gradient(180deg, #60a5fa, #2563eb); flex: none;
+  }
+  .position {
+    margin: 0; font-size: clamp(30px, 10.5vw, 46px); line-height: 1.12;
+    font-weight: 800; letter-spacing: -.01em;
+    background: linear-gradient(180deg, #ffffff 30%, #cfe0ff 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    word-break: break-word;
+  }
+  .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .salary {
+    font-size: clamp(24px, 7.4vw, 34px); font-weight: 800; color: var(--gold);
+    font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+  }
+  .chip {
+    font-size: clamp(13px, 3.6vw, 15px); padding: 4px 12px; border-radius: 999px;
+    background: rgba(59, 130, 246, .16); color: #bfd4ff;
+    border: 1px solid rgba(96, 165, 250, .35); white-space: nowrap;
+  }
+  .badge {
+    font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid transparent; white-space: nowrap; font-weight: 600;
+  }
+  .badge.s-active { color: #6ee7b7; background: rgba(52, 211, 153, .12); border-color: rgba(52, 211, 153, .35); }
+  .badge.s-full { color: #fcd34d; background: rgba(251, 191, 36, .12); border-color: rgba(251, 191, 36, .35); }
+  .badge.s-expired { color: #cbd5e1; background: rgba(148, 163, 184, .12); border-color: rgba(148, 163, 184, .3); }
+
+  .req-block { margin-top: 2px; min-height: 0; display: flex; flex-direction: column; }
+  .req-title {
+    font-size: 13px; color: var(--dim); letter-spacing: .18em;
+    margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+  }
+  .req-title::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .req {
+    margin: 0; padding: 0; list-style: none;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    font-size: clamp(15px, 4.3vw, 19px); line-height: 1.62; color: #dbe4f5;
+    max-height: 34dvh;
+  }
+  .req li { position: relative; padding-left: 1.15em; margin-bottom: .3em; }
+  .req li::before {
+    content: ""; position: absolute; left: .28em; top: .66em;
+    width: 5px; height: 5px; border-radius: 50%; background: #4b7fd6;
+  }
+  .req li.no-dot { padding-left: 0; }
+  .req li.no-dot::before { display: none; }
+  .req::-webkit-scrollbar { width: 3px; }
+  .req::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .18); border-radius: 3px; }
+
+  .contact { margin-top: 4px; display: flex; flex-direction: column; gap: 7px; }
+  .row {
+    display: flex; align-items: flex-start; gap: 9px;
+    font-size: clamp(14px, 4vw, 17px); color: #c2cfe6; line-height: 1.45;
+  }
+  .row .ic { flex: none; opacity: .85; }
+  .phone { font-family: ui-monospace, Consolas, monospace; letter-spacing: .02em; color: #eaf1ff; }
+
+  /* ---------- 底部进度 + 控件 ---------- */
+  .bottom {
+    padding: 10px 20px calc(14px + var(--safe-b));
+    transition: opacity .35s ease;
+  }
+  .bar-wrap { height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+  .bar {
+    height: 100%; width: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, #60a5fa, #a78bfa);
+    transform: scaleX(0); transform-origin: left center;
+  }
+  .controls {
+    margin-top: 12px; display: flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--dim); white-space: nowrap;
+  }
+  .controls button, .controls select {
+    appearance: none; -webkit-appearance: none;
+    background: rgba(255, 255, 255, .07); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 10px;
+    height: 38px; min-width: 38px; padding: 0 10px;
+    font-size: 15px; cursor: pointer; font-family: inherit;
+  }
+  .controls button:active { background: rgba(255, 255, 255, .16); }
+  .controls .main { min-width: 48px; background: rgba(59, 130, 246, .22); border-color: rgba(96, 165, 250, .45); }
+  .controls .iv { display: flex; align-items: center; gap: 5px; flex: none; white-space: nowrap; }
+  .controls select { padding-right: 4px; font-size: 13px; }
+  .controls .sp { flex: 1 1 auto; min-width: 0; }
+  .controls .back {
+    flex: none; color: var(--dim); text-decoration: none; font-size: 13px;
+    padding: 0 10px; height: 38px; line-height: 36px; border-radius: 10px;
+    border: 1px solid var(--line); white-space: nowrap;
+  }
+  .controls .back:hover { color: var(--fg); }
+
+  /* 无操作 4 秒后隐藏控件（直播画面更干净），点一下或按任意键恢复 */
+  body.idle .topbar, body.idle .bottom { opacity: 0; pointer-events: none; }
+  body.idle { cursor: none; }
+
+  .hint {
+    position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%);
+    font-size: 12px; color: rgba(255, 255, 255, .45);
+    background: rgba(0, 0, 0, .35); padding: 6px 12px; border-radius: 999px;
+    opacity: 0; transition: opacity .3s ease; pointer-events: none; white-space: nowrap;
+  }
+  body.show-hint .hint { opacity: 1; }
+
+  .empty { margin: auto; text-align: center; color: var(--dim); font-size: 15px; padding: 40px; }
+  .empty a { color: #93c5fd; }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="topbar">
+    <span class="dot"></span>
+    <span>直播招聘 · 自动轮播</span>
+    <span class="counter"><b id="cur">1</b> / <span id="total">${o.items.length}</span></span>
+  </div>
+
+  <div class="viewport" id="viewport">${body}
+  </div>
+
+  <div class="bottom">
+    <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+    <div class="controls">
+      <button id="prev" title="上一条（←）" aria-label="上一条">⏮</button>
+      <button id="play" class="main" title="暂停 / 继续（空格）" aria-label="暂停">⏸</button>
+      <button id="next" title="下一条（→）" aria-label="下一条">⏭</button>
+      <label class="iv">间隔
+        <select id="interval" aria-label="切换间隔">${options}</select>
+      </label>
+      <span class="sp"></span>
+      <button id="fs" title="全屏" aria-label="全屏">⛶</button>
+      <a class="back" href="${h(back)}" title="返回列表">←</a>
+    </div>
+  </div>
+
+  <div class="hint" id="hint"></div>
+</div>
+
+<script>
+(function () {
+  var items = ${o.items.length};
+  var track = document.getElementById('track');
+  var bar = document.getElementById('bar');
+  var cur = document.getElementById('cur');
+  var btnPlay = document.getElementById('play');
+  var sel = document.getElementById('interval');
+  var hint = document.getElementById('hint');
+  if (!track || items === 0) return;
+
+  var idx = 0;
+  var interval = Math.max(2, parseInt(sel.value, 10) || 8) * 1000;
+  var playing = true;
+  var raf = null;
+  var startedAt = 0;
+  var elapsed = 0;
+  var wakeLock = null;
+
+  /* ---------- 长文本自适应：超出可视高度就逐级缩小字号 ---------- */
+  function fit() {
+    var reqs = document.querySelectorAll('.req[data-fit]');
+    for (var i = 0; i < reqs.length; i++) {
+      var el = reqs[i];
+      el.style.fontSize = '';
+      var base = parseFloat(getComputedStyle(el).fontSize);
+      var size = base;
+      // 只在真的溢出时缩小，最多缩到 12px
+      while (el.scrollHeight > el.clientHeight + 2 && size > 12) {
+        size -= 1;
+        el.style.fontSize = size + 'px';
+      }
+    }
+  }
+
+  /* ---------- 进度与自动切换 ---------- */
+  function paint() {
+    elapsed = performance.now() - startedAt;   // 每帧都要重算，否则永远停在 0
+    var p = Math.min(1, elapsed / interval);
+    bar.style.transform = 'scaleX(' + p + ')';
+    if (p >= 1 && playing) {
+      go(idx + 1);
+      return;
+    }
+    if (playing) raf = requestAnimationFrame(paint);
+  }
+
+  function startTimer(reset) {
+    cancelAnimationFrame(raf);
+    if (reset) { startedAt = performance.now(); elapsed = 0; }
+    bar.style.transform = 'scaleX(' + Math.min(1, elapsed / interval) + ')';
+    if (!playing) return;
+    startedAt = performance.now() - elapsed;
+    raf = requestAnimationFrame(paint);
+  }
+
+  function go(i) {
+    idx = (i + items) % items;
+    track.style.transform = 'translateX(' + (-idx * 100) + '%)';
+    cur.textContent = idx + 1;
+    elapsed = 0;
+    startTimer(true);
+  }
+
+  function setPlaying(v) {
+    playing = v;
+    btnPlay.textContent = v ? '⏸' : '▶';
+    btnPlay.setAttribute('aria-label', v ? '暂停' : '继续');
+    if (v) { startTimer(false); lockScreen(); }
+    else { cancelAnimationFrame(raf); elapsed = performance.now() - startedAt; }
+  }
+
+  /* ---------- 常亮（防止直播时手机自动锁屏） ---------- */
+  function lockScreen() {
+    if (!('wakeLock' in navigator) || wakeLock) return;
+    navigator.wakeLock.request('screen').then(function (w) {
+      wakeLock = w;
+      w.addEventListener('release', function () { wakeLock = null; });
+    }).catch(function () { /* 不支持或被拒绝，忽略 */ });
+  }
+
+  /* ---------- 控件自动隐藏 ---------- */
+  var idleTimer = null;
+  function wake() {
+    document.body.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(function () {
+      if (playing) document.body.classList.add('idle');
+    }, 4000);
+  }
+  ['pointerdown', 'pointermove', 'keydown', 'wheel'].forEach(function (ev) {
+    document.addEventListener(ev, wake, { passive: true });
+  });
+  wake();
+
+  function toast(msg) {
+    hint.textContent = msg;
+    document.body.classList.add('show-hint');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { document.body.classList.remove('show-hint'); }, 1400);
+  }
+
+  /* ---------- 交互 ---------- */
+  document.getElementById('prev').addEventListener('click', function () { go(idx - 1); });
+  document.getElementById('next').addEventListener('click', function () { go(idx + 1); });
+  btnPlay.addEventListener('click', function () { setPlaying(!playing); });
+
+  sel.addEventListener('change', function () {
+    interval = Math.max(2, parseInt(sel.value, 10) || 8) * 1000;
+    var u = new URL(location.href);
+    u.searchParams.set('interval', String(interval / 1000));
+    history.replaceState(null, '', u);
+    startTimer(true);
+    toast('切换间隔 ' + interval / 1000 + ' 秒');
+  });
+
+  document.getElementById('fs').addEventListener('click', function () {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen().catch(function () {});
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft') { go(idx - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { go(idx + 1); e.preventDefault(); }
+    else if (e.key === ' ' || e.code === 'Space') { setPlaying(!playing); e.preventDefault(); }
+    else if (e.key === 'f' || e.key === 'F') { document.getElementById('fs').click(); }
+  });
+
+  /* 左右滑动（竖着滑交给岗位要求的滚动） */
+  var sx = 0, sy = 0, tracking = false;
+  var vp = document.getElementById('viewport');
+  vp.addEventListener('pointerdown', function (e) { sx = e.clientX; sy = e.clientY; tracking = true; });
+  vp.addEventListener('pointerup', function (e) {
+    if (!tracking) return;
+    tracking = false;
+    var dx = e.clientX - sx, dy = e.clientY - sy;
+    if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) go(idx + (dx < 0 ? 1 : -1));
+  });
+  vp.addEventListener('pointercancel', function () { tracking = false; });
+
+  /* 页面切到后台就停，回来再继续，避免手机锁屏后回来乱跳 */
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { cancelAnimationFrame(raf); }
+    else if (playing) { startTimer(false); lockScreen(); }
+  });
+
+  fit();
+  window.addEventListener('resize', fit);
+  startTimer(true);
+})();
+</script>
+</body>
+</html>`;
 }
 
 // --------------------------------------------------------------------------- //
