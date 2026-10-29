@@ -361,8 +361,14 @@ function hasOwnNumber(line: string): boolean {
  */
 export function livePage(o: {
   items: LiveItem[]; interval: number; choices: number[]; backUrl?: string;
+  /** 是否显示顶部背景（台标），默认显示 */
+  logo?: boolean;
+  /** 台标图片地址，默认站内 /logo.jpg */
+  logoUrl?: string;
 }): string {
   const back = o.backUrl || '/';
+  const logoUrl = o.logoUrl || '/logo.jpg';
+  const logoOn = o.logo !== false;
   const slides = o.items.map((it, i) => `
       <section class="slide" data-i="${i}">
         <div class="company">${h(it.company)}</div>
@@ -447,6 +453,7 @@ export function livePage(o: {
     .chip, .badge { font-size: min(15px, 1.7vh); }
     .req { font-size: min(19px, 2.2vh); max-height: 36vh; }
     .row { font-size: min(17px, 2vh); }
+    .brand img { width: min(13vh, 132px); }
   }
 
   /* ---------- 顶部状态条 ---------- */
@@ -468,6 +475,31 @@ export function livePage(o: {
   }
   .counter { margin-left: auto; font-variant-numeric: tabular-nums; }
   .counter b { color: var(--fg); font-size: 15px; }
+  /* 顶部「背景（台标）」开关 */
+  .tb-btn {
+    appearance: none; -webkit-appearance: none; margin-left: 10px;
+    background: rgba(255, 255, 255, .07); color: var(--dim);
+    border: 1px solid var(--line); border-radius: 999px;
+    height: 26px; padding: 0 10px; font-size: 12px; font-family: inherit;
+    line-height: 24px; cursor: pointer; white-space: nowrap; flex: none;
+  }
+  .tb-btn[aria-pressed="true"] {
+    color: #cfe0ff; border-color: rgba(96, 165, 250, .5); background: rgba(59, 130, 246, .18);
+  }
+
+  /* ---------- 顶部背景（台标） ---------- */
+  .brand {
+    display: flex; justify-content: center;
+    padding: 4px 20px 0;
+    transition: opacity .25s ease;
+  }
+  .brand img {
+    display: block; width: clamp(96px, 30vw, 120px); height: auto;
+    background: #fff; border-radius: 14px; padding: 5px 7px;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .08);
+    user-select: none; -webkit-user-drag: none;
+  }
+  body.no-logo .brand { display: none; }
 
   /* ---------- 内容区 ---------- */
   .viewport { flex: 1; overflow: hidden; position: relative; }
@@ -529,6 +561,8 @@ export function livePage(o: {
     font-size: clamp(15px, 4.3vw, 19px); line-height: 1.62; color: #dbe4f5;
     max-height: 34dvh;
   }
+  /* 顶部有台标时少占一点高度，避免长岗位要求把整屏顶出去 */
+  body:not(.no-logo) .req { max-height: 29dvh; }
   .req li { position: relative; padding-left: 1.15em; margin-bottom: .3em; }
   .req li::before {
     content: ""; position: absolute; left: .28em; top: .66em;
@@ -597,13 +631,17 @@ export function livePage(o: {
   .empty a { color: #93c5fd; }
 </style>
 </head>
-<body>
+<body${logoOn ? '' : ' class="no-logo"'}>
 <div class="stage" id="stage">
   <div class="topbar">
     <span class="dot"></span>
     <span>直播招聘 · 自动轮播</span>
     <span class="counter"><b id="cur">1</b> / <span id="total">${o.items.length}</span></span>
+    <button class="tb-btn" id="logoToggle" type="button" aria-pressed="${logoOn ? 'true' : 'false'}"
+            title="显示 / 隐藏顶部背景（L）">🖼 背景</button>
   </div>
+
+  <div class="brand" id="brand"><img src="${h(logoUrl)}" alt="洲到人社" draggable="false"></div>
 
   <div class="viewport" id="viewport">${body}
   </div>
@@ -728,6 +766,25 @@ export function livePage(o: {
     toast._t = setTimeout(function () { document.body.classList.remove('show-hint'); }, 1400);
   }
 
+  /* ---------- 顶部背景（台标）开关 ---------- */
+  var btnLogo = document.getElementById('logoToggle');
+  var hasLogo = !document.body.classList.contains('no-logo');
+  function setLogo(v, remember) {
+    hasLogo = v;
+    document.body.classList.toggle('no-logo', !v);
+    if (btnLogo) btnLogo.setAttribute('aria-pressed', v ? 'true' : 'false');
+    if (remember) {
+      var u = new URL(location.href);
+      u.searchParams.set('logo', v ? '1' : '0');
+      history.replaceState(null, '', u);
+    }
+    fit();   // 台标显隐会改变可用高度，重算一遍字号
+  }
+  if (btnLogo) btnLogo.addEventListener('click', function () {
+    setLogo(!hasLogo, true);
+    toast(hasLogo ? '已显示顶部背景' : '已隐藏顶部背景');
+  });
+
   /* ---------- 交互 ---------- */
   document.getElementById('prev').addEventListener('click', function () { go(idx - 1); });
   document.getElementById('next').addEventListener('click', function () { go(idx + 1); });
@@ -754,6 +811,7 @@ export function livePage(o: {
     else if (e.key === 'ArrowRight') { go(idx + 1); e.preventDefault(); }
     else if (e.key === ' ' || e.code === 'Space') { setPlaying(!playing); e.preventDefault(); }
     else if (e.key === 'f' || e.key === 'F') { document.getElementById('fs').click(); }
+    else if ((e.key === 'l' || e.key === 'L') && btnLogo) { setLogo(!hasLogo, true); }
   });
 
   /* 左右滑动（竖着滑交给岗位要求的滚动） */

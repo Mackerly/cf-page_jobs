@@ -57,6 +57,7 @@ cf-pages/
 │   └── qr.ts              # 二维码 JPEG（base64 内联）
 ├── public/
 │   ├── favicon.svg
+│   ├── logo.jpg           # 直播页顶部台标（换图直接覆盖，记得同步改 Worker 的 src/logo.ts）
 │   ├── robots.txt
 │   ├── _headers           # 静态资源的响应头
 │   └── _routes.json       # 把静态资源排除出函数路由（关键！）
@@ -267,15 +268,16 @@ python tests/e2e.py        # 期望：通过 60 项，失败 0 项
 解决办法是 `public/_routes.json` 显式排除：
 
 ```json
-{ "version": 1, "include": ["/*"], "exclude": ["/favicon.svg", "/robots.txt"] }
+{ "version": 1, "include": ["/*"], "exclude": ["/favicon.svg", "/robots.txt", "/logo.jpg"] }
 ```
 
 不加这个文件，静态资源会全部 404（实测过）。规则上限 100 条，静态文件多的话可以按前缀排除。
+直播页的台标 `/logo.jpg` 就是踩过这个坑之后补进 exclude 的——漏了它，直播页顶部会显示裂图。
 
 ### 2. 不要在 `public/` 放 `index.html`
 
 Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态页，覆盖掉 `/` 的动态路由。
-本项目的 `public/` 只放 favicon、robots.txt 和两个配置文件。
+本项目的 `public/` 只放 favicon、logo.jpg、robots.txt 和两个配置文件。
 
 ### 3. 预览部署默认连的是生产 D1
 
@@ -319,7 +321,8 @@ Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态
 | GET | `/docx/range?start=&end=&show_full=&show_expired=` | 登录 | 按发布日期区间导出，范围内每条一页合并成一个 Word |
 | POST | `/docx/selected` | 登录 | 勾选的多条合并为一个 Word（每条一页） |
 | POST | `/wechat/selected` | 登录 | 勾选的多条生成公众号可粘贴的 HTML（单篇最多 30 条） |
-| GET/POST | `/live?ids=&interval=` | 登录 | 直播轮播：勾选的多条在手机全屏按间隔循环播放（单次最多 30 条） |
+| GET/POST | `/live?ids=&interval=&logo=` | 登录 | 直播轮播：勾选的多条在手机全屏按间隔循环播放（单次最多 30 条；`logo=0` 关掉顶部台标） |
+| GET | `/logo.jpg` | 公开 | 直播页顶部台标（`public/logo.jpg`，已在 `_routes.json` 里排除出函数） |
 | GET | `/backup.sql` | 管理员 | 整库 SQL 备份（表结构 + 索引 + 数据） |
 | GET | `/users` | 管理员 | 账号管理 |
 | POST | `/users/:id/action` | 管理员 | 审批/停用/启用/改角色/重置密码/删除 |

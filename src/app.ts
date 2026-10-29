@@ -710,6 +710,12 @@ function queryIds(u: URL): number[] {
   return ids;
 }
 
+/** 把 ?logo=0 / ?logo=1 这类开关解析成布尔值；没传或认不出时用默认值 */
+function flag(raw: string | null, dflt = true): boolean {
+  if (raw === null || raw === '') return dflt;
+  return !['0', 'false', 'no', 'off'].includes(raw.trim().toLowerCase());
+}
+
 /** 切换间隔：只接受预设值，认不出就退回默认 8 秒 */
 function pickInterval(raw: unknown): number {
   const n = Number(String(raw ?? '').trim());
@@ -781,6 +787,7 @@ async function handleLive(c: Ctx, form: FormData | null): Promise<Response> {
     `共 ${rows.length} 条，间隔 ${interval} 秒（编号 ${rows.map((r: any) => r.id).join(',')}）`);
   return htmlRes(c, pages.livePage({
     items: liveItems(rows), interval, choices: LIVE_INTERVALS, backUrl: '/',
+    logo: flag(c.url.searchParams.get('logo')),
   }));
 }
 

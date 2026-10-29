@@ -6,3 +6,8 @@
 
 /robots.txt
   Cache-Control: public, max-age=3600
+
+# 直播页顶部的背景（台标），换图时记得同时改个名字或加版本号，否则长缓存不会刷新
+/logo.jpg
+  Cache-Control: public, max-age=86400
+  X-Content-Type-Options: nosniff
