@@ -529,6 +529,11 @@ _, lst, _ = reg.get("/")
 check("选择条有微信发布按钮", "/wechat/selected" in lst and "微信发布" in lst)
 check("选择条有三个动作按钮", lst.count('class="btn btn-primary btn-xs sel-act"')
       + lst.count('class="btn btn-soft btn-xs sel-act"') == 3)
+# 全选：表头的 #pickAll 也带 .pick-box（th .pick-box 的间距样式），脚本必须只取行内复选框，
+# 否则「全选」会把自己算成一条、并被 sync() 立刻取消勾选
+check("全选脚本只作用于行内复选框", '.pick-box[name="ids"]' in lst)
+check("全选按事件目标状态同步", "e.target.checked" in lst)
+check("表头全选框仍带 pick-box 样式", 'id="pickAll"' in lst and 'class="pick-box"' in lst)
 
 st, wx, _ = reg.post("/wechat/selected", {"_csrf": sel_token, "ids": [str(RID), str(rid)]})
 check("微信发布 200", st == 200, st)

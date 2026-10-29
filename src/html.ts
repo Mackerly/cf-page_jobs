@@ -223,7 +223,10 @@ export function indexPage(o: LayoutOpts & {
 
   var form = document.getElementById('selForm');
   if (!form) return;
-  var boxes = Array.prototype.slice.call(document.querySelectorAll('.pick-box'));
+  // 只取行内的复选框：表头的「全选」也带 .pick-box（为了 th .pick-box 的间距样式），
+  // 但它不是数据项，混进来会导致「全选」把自己也算成一条、并且被 sync() 立刻取消勾选。
+  var boxes = Array.prototype.slice.call(
+    document.querySelectorAll('.pick-box[name="ids"]'));
   var all = document.getElementById('pickAll');
   var counter = document.getElementById('selCount');
   var btns = Array.prototype.slice.call(document.querySelectorAll('.sel-act'));
@@ -238,8 +241,10 @@ export function indexPage(o: LayoutOpts & {
     }
   }
   boxes.forEach(function (b) { b.addEventListener('change', sync); });
-  if (all) all.addEventListener('change', function () {
-    boxes.forEach(function (b) { b.checked = all.checked; });
+  // 目标状态从事件里取：sync() 会按行状态重写 all.checked，直接读 all.checked 会拿到被改写后的值
+  if (all) all.addEventListener('change', function (e) {
+    var on = e.target.checked;
+    boxes.forEach(function (b) { b.checked = on; });
     sync();
   });
   form.addEventListener('submit', function (e) { if (!picked().length) e.preventDefault(); });
