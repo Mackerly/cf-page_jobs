@@ -724,11 +724,14 @@ check("打印页有大标题", "招 聘 简 章" in one)
 check("打印页有编号", "编号：ZP-" in one)
 check("打印页有表格标签", "招聘岗位" in one and "岗位要求" in one)
 check("打印页有二维码", 'src="/qr.jpg"' in one)
-check("打印页打印时按页断开", "break-after: page" in one)
+check("打印页按页断开（用 break-before，末页不会多出空白）",
+      "break-before: page" in one and "break-after: page" not in one)
+check("打印页有「超一页就缩字号」的自适应", "fitSheets" in one and "beforeprint" in one)
+check("打印页屏幕宽度与打印一致（184mm 内容区）", "width: 206mm" in one and "padding: 10mm 11mm" in one)
 check("打印页默认不自动弹打印框", "setTimeout(function () { window.print()" not in one)
 
 st, autop, _ = reg.get(f"/print/{RID}?print=1")
-check("?print=1 自动弹打印框", "setTimeout(function () { window.print()" in autop)
+check("?print=1 自动弹打印框", "setTimeout(function () { fitSheets(); window.print(); }" in autop)
 
 st, two, _ = reg.get(f"/print?ids={RID},{pid}")
 check("勾选打印 200", st == 200, st)

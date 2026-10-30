@@ -945,20 +945,25 @@ export function printPage(o: {
   .bar a:hover, .bar button:hover { background: rgba(255,255,255,.16); }
   .bar button.primary:hover { background: #1d4ed8; }
 
+  /* 屏幕上也让内容区正好 184mm 宽（与打印时 @page 的可用宽度一致），
+     这样下面那段 JS 量出来的高度，就等于打印时的高度，判断才准 */
   .sheet {
-    width: 184mm; margin: 8mm auto; padding: 10mm 11mm; background: #fff;
+    width: 206mm; margin: 8mm auto; padding: 10mm 11mm; background: #fff;
     box-shadow: 0 8px 26px rgba(16, 24, 40, .16);
+    font-size: 11pt; line-height: normal;
   }
-  .no { text-align: right; font-size: 9pt; color: #888; }
+  .no { text-align: right; font-size: .82em; color: #888; }
+  /* 以下间距统一用 em：长内容缩字号时，行距、表格内边距、二维码、页脚间距会等比一起收，
+     这样才真正能把内容压进一页（全用 mm 的话，缩字号省下的高度很有限） */
   h1 {
-    margin: 2mm 0 1.5mm; text-align: center; font-size: 22pt; font-weight: 700;
+    margin: .52em 0 .39em; text-align: center; font-size: 2em; font-weight: 700;
     letter-spacing: .38em; text-indent: .38em;
   }
-  .company { text-align: center; font-size: 13pt; font-weight: 700; margin-bottom: 2.5mm; }
-  hr { border: 0; border-top: 1.2pt solid #333; margin: 0 0 3mm; }
+  .company { text-align: center; font-size: 1.18em; font-weight: 700; margin-bottom: .64em; }
+  hr { border: 0; border-top: 1.2pt solid #333; margin: 0 0 .77em; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; }
   th, td {
-    border: .5pt solid #404040; padding: 1.7mm 2mm; font-size: 11pt;
+    border: .5pt solid #404040; padding: .44em .52em;
     vertical-align: middle; word-break: break-word;
   }
   th { width: 27%; background: #f2f2f2; text-align: center; font-weight: 700; }
@@ -966,22 +971,22 @@ export function printPage(o: {
   td.req { vertical-align: top; }
   td.req div { line-height: 1.5; }
   .closing {
-    margin: 4mm 0 0; text-indent: 2em; font-size: 11pt; line-height: 1.55; text-align: justify;
+    margin: 1.03em 0 0; text-indent: 2em; line-height: 1.55; text-align: justify;
   }
-  .sign { margin: 1mm 0 0; text-align: right; font-size: 11pt; line-height: 1.6; }
-  .qr { margin-top: 5mm; text-align: center; }
-  .qr img { width: 26mm; height: 26mm; }
-  .qr div { margin-top: 1mm; font-size: 9pt; color: #404040; }
-  .foot { margin-top: 7mm; text-align: center; font-size: 8.5pt; color: #808080; }
+  .sign { margin: .26em 0 0; text-align: right; line-height: 1.6; }
+  .qr { margin-top: 1.29em; text-align: center; }
+  .qr img { width: 6.7em; height: 6.7em; }
+  .qr div { margin-top: .26em; font-size: .82em; color: #404040; }
+  .foot { margin-top: 1.8em; text-align: center; font-size: .77em; color: #808080; }
 
   @media print {
     body { background: #fff; }
     .bar { display: none !important; }
-    .sheet {
-      width: auto; margin: 0; padding: 0; box-shadow: none;
-      break-after: page; page-break-after: always;
-    }
-    .sheet:last-child { break-after: auto; page-break-after: auto; }
+    .sheet { width: auto; margin: 0; padding: 0; box-shadow: none; }
+    /* 用「下一张之前分页」而不是「本张之后分页」：
+       最后一张后面永远不会再多出一页空白（原来用 :last-child 也匹配不上，后面还有个 <script>） */
+    .sheet + .sheet { break-before: page; page-break-before: always; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
   }
 </style>
 </head>
@@ -995,8 +1000,39 @@ export function printPage(o: {
 </div>
 ${sheets}
 <script>
-document.getElementById('btnPrint').addEventListener('click', function () { window.print(); });
-${o.autoPrint ? "window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 400); });" : ''}
+// 岗位要求很长时，11pt 会撑出第二页（那一页几乎只有落款，看着就像空白页）。
+// 这里按打印可用高度逐级缩字号，缩到能装进一页为止，和 Word / PDF 版的自适应一致。
+(function () {
+  var MAX_MM = 268;              // 打印可用高度 297 - 14 - 12 = 271mm，留 3mm 余量防舍入
+  var PX_PER_MM = 96 / 25.4;
+  function fitSheets() {
+    var sheets = document.querySelectorAll('.sheet');
+    for (var i = 0; i < sheets.length; i++) {
+      var sh = sheets[i], first = sh.firstElementChild, last = sh.lastElementChild;
+      if (!first || !last) continue;
+      sh.style.fontSize = '';
+      var pt = 11;
+      for (var j = 0; j < 24; j++) {
+        var h = (last.getBoundingClientRect().bottom - first.getBoundingClientRect().top) / PX_PER_MM;
+        if (h <= MAX_MM || pt <= 7.5) break;
+        pt = Math.round((pt - 0.25) * 100) / 100;
+        sh.style.fontSize = pt + 'pt';
+      }
+    }
+  }
+  window.fitSheets = fitSheets;
+  function ready() {
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitSheets);
+    else fitSheets();
+  }
+  if (document.readyState === 'complete') ready();
+  else window.addEventListener('load', ready);
+  window.addEventListener('beforeprint', fitSheets);
+  document.getElementById('btnPrint').addEventListener('click', function () {
+    fitSheets(); window.print();
+  });
+  ${o.autoPrint ? "window.addEventListener('load', function () { setTimeout(function () { fitSheets(); window.print(); }, 400); });" : ''}
+})();
 </script>
 </body>
 </html>`;
