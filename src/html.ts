@@ -1689,7 +1689,7 @@ export function auditPage(o: LayoutOpts & { rows: any[] }): string {
 export function previewPage(info: DocInfo, user: UserLike | null): string {
   const editLink = user ? `<a href="/edit/${info.id}">编辑</a>` : '';
   // 单条打印页 /print/:id 和 /docx/:id 一样是公开的，所以访客也能看到这个入口
-  const pdfLink = `<a class="primary" href="/print/${info.id}?print=1">下载 PDF</a>`;
+  const pdfLink = `<a href="/print/${info.id}?print=1">下载 PDF</a>`;
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
