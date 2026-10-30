@@ -158,6 +158,7 @@ export function indexPage(o: LayoutOpts & {
       <td class="ops">
         <a class="btn btn-xs" href="/preview/${r.id}">预览</a>
         <a class="btn btn-xs btn-primary" href="/docx/${r.id}">Word</a>
+        <a class="btn btn-xs" href="/print/${r.id}?print=1" title="A4 打印版，可直接打印或存为 PDF">PDF</a>
         ${user ? `<a class="btn btn-xs" href="/edit/${r.id}">编辑</a>
         <form method="post" action="/delete/${r.id}" class="inline"
               onsubmit="return confirm('确定删除第 ${seq} 条「${h(r.company_name)} - ${h(r.position)}」吗？此操作不可恢复。');">
@@ -198,8 +199,8 @@ export function indexPage(o: LayoutOpts & {
   const notice = !user ? `
     <div class="notice">
       <span class="notice-ic">🔒</span>
-      <div><b>当前为访客浏览模式。</b>招聘列表、打印预览与单条 Word 简章可自由使用；
-      新增 / 编辑 / 删除、导入 Excel、导出 Excel、批量生成 Word、按日期导出、微信发布需登录后操作。</div>
+      <div><b>当前为访客浏览模式。</b>招聘列表、打印预览与单条 Word / PDF 简章可自由使用；
+      新增 / 编辑 / 删除、导入 Excel、导出 Excel、批量生成 Word、批量打印、按日期导出、微信发布需登录后操作。</div>
       <a class="btn btn-xs btn-primary" href="/login">登录</a>
     </div>` : '';
 
@@ -211,8 +212,10 @@ export function indexPage(o: LayoutOpts & {
     <button class="btn btn-soft btn-xs sel-act" type="submit" disabled
             formaction="/wechat/selected">📋 复制微信发布</button>
     <button class="btn btn-soft btn-xs sel-act" type="submit" disabled
+            formaction="/print" formmethod="get" name="print" value="1">🖨 打印选定（存为 PDF）</button>
+    <button class="btn btn-soft btn-xs sel-act" type="submit" disabled
             formaction="/live">📺 直播轮播</button>
-    <span class="selbar-hint">Word：每条一页合并成一个文件；微信：生成公众号排版，一键复制到剪贴板（每篇最多 ${o.maxWechat || 30} 条）；直播：手机全屏循环播放，可设切换间隔（最多 ${o.maxLive || 30} 条）</span>
+    <span class="selbar-hint">Word：每条一页合并成一个文件；打印：每条一页的 A4 版式，浏览器里「另存为 PDF」即可；微信：生成公众号排版，一键复制到剪贴板（每篇最多 ${o.maxWechat || 30} 条）；直播：手机全屏循环播放，可设切换间隔（最多 ${o.maxLive || 30} 条）</span>
   </form>` : '';
 
   const pickScript = user ? `
@@ -277,7 +280,7 @@ export function indexPage(o: LayoutOpts & {
       <p class="sub">共 <b>${total}</b> 条招聘信息${
   q ? `（关键词：${h(q)}）` : ''}${
   start || end ? `（日期：${start || '不限'} ~ ${end || '不限'}）` : ''}${
-  showFull || showExpired ? `（含${showFull ? '已招满' : ''}${showFull && showExpired ? '、' : ''}${showExpired ? '已失效' : ''}）` : ''}，每条可直接生成单页 Word 简章打印</p>
+  showFull || showExpired ? `（含${showFull ? '已招满' : ''}${showFull && showExpired ? '、' : ''}${showExpired ? '已失效' : ''}）` : ''}，每条可直接生成单页 Word / PDF 简章打印</p>
     </div>
     <div class="head-actions"><a class="btn btn-primary" href="/add">+ 新增招聘信息</a></div>
   </div>
@@ -294,6 +297,11 @@ export function indexPage(o: LayoutOpts & {
     </form>
     <div class="tool-actions">
       <a class="btn btn-soft" href="/docx/zip${qs({ q: q || undefined })}">📦 批量生成 Word（ZIP）</a>
+      <a class="btn btn-soft" href="/print${qs({
+        q: q || undefined, start: start || undefined, end: end || undefined,
+        show_full: showFull ? '1' : undefined, show_expired: showExpired ? '1' : undefined,
+        print: '1',
+      })}" title="当前筛选的全部招聘信息排成 A4 打印页，每条一页">🖨 批量打印（每条一页）</a>
       <a class="btn btn-soft" href="/import">⬆ 导入 Excel</a>
     </div>
   </div>
@@ -314,6 +322,11 @@ export function indexPage(o: LayoutOpts & {
     <button class="btn btn-soft" type="submit">🔍 筛选</button>
     <button class="btn btn-soft" type="submit" formaction="/export/excel">⬇ 导出 Excel</button>
     <button class="btn btn-soft" type="submit" formaction="/docx/range">📄 导出 Word（每条一页）</button>
+    <button class="btn btn-soft" type="submit" formaction="/print"
+            formmethod="get" name="print" value="1"
+            title="把该时间段内的招聘信息排成 A4 打印页，每条一页">🖨 打印该时间段</button>
+    <button class="btn btn-soft" type="submit" formaction="/live"
+            title="把该时间段内的招聘信息全部拉进直播页循环播放">📺 直播该时间段</button>
     <span class="datebar-hint">日期按「发布日期」比较，留空 = 全部；发布满 1 个月自动失效；筛选同时作用于列表与导出</span>
   </form>
   ${filterNote}
@@ -323,7 +336,7 @@ export function indexPage(o: LayoutOpts & {
     <thead><tr>
       <th style="width:72px">${user ? '<input type="checkbox" id="pickAll" class="pick-box" title="全选本页" aria-label="全选本页"> ' : ''}序号</th><th style="width:140px">用人单位名称</th>
       <th style="width:100px">招聘岗位</th><th style="width:52px">招聘数</th>
-      <th style="width:110px">工资待遇（元）</th><th style="width:150px">岗位要求</th>
+      <th style="width:110px">工资待遇（元）</th><th style="width:140px">岗位要求</th>
       <th style="width:94px">地址</th><th style="width:128px">联系电话</th>
       <th style="width:96px">发布日期</th><th style="width:86px">招聘状态</th><th style="width:242px">操作</th>
     </tr></thead>
@@ -365,6 +378,8 @@ export function livePage(o: {
   logo?: boolean;
   /** 台标图片地址，默认站内 /logo.jpg */
   logoUrl?: string;
+  /** 按时间段直播时顶部的说明，如 2026-10-01 ~ 2026-10-31 */
+  rangeLabel?: string;
 }): string {
   const back = o.backUrl || '/';
   const logoUrl = o.logoUrl || '/logo.jpg';
@@ -472,6 +487,10 @@ export function livePage(o: {
     0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, .55); }
     70% { box-shadow: 0 0 0 9px rgba(239, 68, 68, 0); }
     100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  }
+  .scope {
+    margin-left: 8px; font-style: normal; font-size: 12px;
+    color: var(--dim); letter-spacing: 0; font-variant-numeric: tabular-nums;
   }
   .counter { margin-left: auto; font-variant-numeric: tabular-nums; }
   .counter b { color: var(--fg); font-size: 15px; }
@@ -635,7 +654,7 @@ export function livePage(o: {
 <div class="stage" id="stage">
   <div class="topbar">
     <span class="dot"></span>
-    <span>直播招聘 · 自动轮播</span>
+    <span>直播招聘 · 自动轮播${o.rangeLabel ? `<em class="scope">${h(o.rangeLabel)}</em>` : ''}</span>
     <span class="counter"><b id="cur">1</b> / <span id="total">${o.items.length}</span></span>
     <button class="tb-btn" id="logoToggle" type="button" aria-pressed="${logoOn ? 'true' : 'false'}"
             title="显示 / 隐藏顶部背景（L）">🖼 背景</button>
@@ -836,6 +855,148 @@ export function livePage(o: {
   window.addEventListener('resize', fit);
   startTimer(true);
 })();
+</script>
+</body>
+</html>`;
+}
+
+// --------------------------------------------------------------------------- //
+// 打印版（A4，每条一页）：浏览器里「打印 → 另存为 PDF」即可得到可打印的 PDF
+// --------------------------------------------------------------------------- //
+export interface PrintItem {
+  id: number;
+  /** 编号，形如 ZP-2026-0001 */
+  no: string;
+  company: string;
+  position: string;
+  headcount: string;
+  salary: string;
+  address: string;
+  phone: string;
+  reqLines: string[];
+  statusLabel: string;
+}
+
+export function printPage(o: {
+  items: PrintItem[];
+  /** 顶部说明，如「2026-10-01 ~ 2026-10-31 · 共 12 条」 */
+  subtitle?: string;
+  backUrl?: string;
+  qrUrl?: string;
+  /** 打开后自动弹出打印对话框 */
+  autoPrint?: boolean;
+}): string {
+  const back = o.backUrl || '/';
+  const qr = o.qrUrl || '/qr.jpg';
+  const today = new Date();
+  const dateText = `${today.getFullYear()} 年 ${today.getMonth() + 1} 月 ${today.getDate()} 日`;
+
+  const sheets = o.items.map((it) => `
+<section class="sheet">
+  <div class="no">编号：${h(it.no)}</div>
+  <h1>招 聘 简 章</h1>
+  <div class="company">${h(it.company)}</div>
+  <hr>
+  <table>
+    <tr><th>招聘岗位</th><td class="b">${h(it.position)}</td></tr>
+    <tr><th>招聘人数</th><td>${h(it.headcount)}</td></tr>
+    <tr><th>工资待遇</th><td class="b">${h(it.salary)}</td></tr>
+    <tr><th>工作地址</th><td>${h(it.address)}</td></tr>
+    <tr><th>联系电话</th><td>${h(it.phone)}</td></tr>
+    <tr><th>岗位要求</th><td class="req">${
+  it.reqLines.map((ln) => `<div>${h(ln)}</div>`).join('') || '<div>详见面谈。</div>'}</td></tr>
+  </table>
+  <p class="closing">有意应聘者请携带本人身份证及相关证件，于工作日到上述地址报名面试，或来电咨询。本简章长期有效，招满为止。</p>
+  <p class="sign">发布单位：${h(it.company)}（盖章）</p>
+  <p class="sign">发布日期：${dateText}</p>
+  <div class="qr"><img src="${h(qr)}" alt="二维码"><div>扫码关注，获取最新招聘信息</div></div>
+  <div class="foot">— 本招聘简章最终解释权归用人单位所有 —</div>
+</section>`).join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>招聘简章 · 打印版</title>
+<style>
+  @page { size: A4; margin: 14mm 13mm 12mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: #eef1f5; color: #111;
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB",
+                 "Source Han Sans SC", "Noto Sans CJK SC", sans-serif;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .bar {
+    position: sticky; top: 0; z-index: 9; display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; background: #111827; color: #d7dde8; font-size: 13px;
+  }
+  .bar b { color: #fff; }
+  .bar .sp { margin-left: auto; }
+  .bar .hint { color: #9aa6b8; font-size: 12px; }
+  .bar a, .bar button {
+    appearance: none; border: 1px solid rgba(255,255,255,.22); background: rgba(255,255,255,.08);
+    color: #e8edf6; border-radius: 8px; padding: 6px 12px; font-size: 13px;
+    font-family: inherit; cursor: pointer; text-decoration: none; line-height: 1.2;
+  }
+  .bar button.primary { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 600; }
+  .bar a:hover, .bar button:hover { background: rgba(255,255,255,.16); }
+  .bar button.primary:hover { background: #1d4ed8; }
+
+  .sheet {
+    width: 184mm; margin: 8mm auto; padding: 10mm 11mm; background: #fff;
+    box-shadow: 0 8px 26px rgba(16, 24, 40, .16);
+  }
+  .no { text-align: right; font-size: 9pt; color: #888; }
+  h1 {
+    margin: 2mm 0 1.5mm; text-align: center; font-size: 22pt; font-weight: 700;
+    letter-spacing: .38em; text-indent: .38em;
+  }
+  .company { text-align: center; font-size: 13pt; font-weight: 700; margin-bottom: 2.5mm; }
+  hr { border: 0; border-top: 1.2pt solid #333; margin: 0 0 3mm; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td {
+    border: .5pt solid #404040; padding: 1.7mm 2mm; font-size: 11pt;
+    vertical-align: middle; word-break: break-word;
+  }
+  th { width: 27%; background: #f2f2f2; text-align: center; font-weight: 700; }
+  td.b { font-weight: 700; }
+  td.req { vertical-align: top; }
+  td.req div { line-height: 1.5; }
+  .closing {
+    margin: 4mm 0 0; text-indent: 2em; font-size: 11pt; line-height: 1.55; text-align: justify;
+  }
+  .sign { margin: 1mm 0 0; text-align: right; font-size: 11pt; line-height: 1.6; }
+  .qr { margin-top: 5mm; text-align: center; }
+  .qr img { width: 26mm; height: 26mm; }
+  .qr div { margin-top: 1mm; font-size: 9pt; color: #404040; }
+  .foot { margin-top: 7mm; text-align: center; font-size: 8.5pt; color: #808080; }
+
+  @media print {
+    body { background: #fff; }
+    .bar { display: none !important; }
+    .sheet {
+      width: auto; margin: 0; padding: 0; box-shadow: none;
+      break-after: page; page-break-after: always;
+    }
+    .sheet:last-child { break-after: auto; page-break-after: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="bar">
+  <b>打印版 · ${o.items.length} 条</b>
+  <span class="hint">${h(o.subtitle || '每条一页 A4')}</span>
+  <span class="sp"></span>
+  <button class="primary" type="button" id="btnPrint">🖨 打印 / 存为 PDF</button>
+  <a href="${h(back)}">返回列表</a>
+</div>
+${sheets}
+<script>
+document.getElementById('btnPrint').addEventListener('click', function () { window.print(); });
+${o.autoPrint ? "window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 400); });" : ''}
 </script>
 </body>
 </html>`;
@@ -1527,6 +1688,8 @@ export function auditPage(o: LayoutOpts & { rows: any[] }): string {
 // --------------------------------------------------------------------------- //
 export function previewPage(info: DocInfo, user: UserLike | null): string {
   const editLink = user ? `<a href="/edit/${info.id}">编辑</a>` : '';
+  // 单条打印页 /print/:id 和 /docx/:id 一样是公开的，所以访客也能看到这个入口
+  const pdfLink = `<a class="primary" href="/print/${info.id}?print=1">下载 PDF</a>`;
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -1594,6 +1757,7 @@ export function previewPage(info: DocInfo, user: UserLike | null): string {
     <a href="/">返回列表</a>
     ${editLink}
     <a class="primary" href="/docx/${info.id}">下载 Word</a>
+    ${pdfLink}
     <button onclick="window.print()">打印</button>
   </div>
 </div>

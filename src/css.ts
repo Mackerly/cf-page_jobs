@@ -209,6 +209,8 @@ a:hover { text-decoration: underline; }
 }
 .ops { white-space: nowrap; padding-left: 4px !important; padding-right: 4px !important; }
 .ops .btn { margin-right: 2px; }
+/* 操作列有 5 个按钮（预览 / Word / PDF / 编辑 / 删除），左右内边距收窄一点才不挤出格 */
+.ops .btn-xs { padding: 0 6px; }
 /* 招聘状态徽标 */
 .st {
   display: inline-block;

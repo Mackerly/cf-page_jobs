@@ -134,13 +134,16 @@ RID = int(_first.group(1)) if _first else 1
 
 # ---------- 1. 匿名访问 ----------
 print("[1] 匿名访问")
-for path in ("/", "/login", "/register", f"/docx/{RID}", "/qr.jpg", f"/preview/{RID}"):
+for path in ("/", "/login", "/register", f"/docx/{RID}", "/qr.jpg", f"/preview/{RID}",
+             f"/print/{RID}"):
     st, _, _ = S().get(path)
     check(f"公开可访问 {path}", st == 200, st)
 for path in ("/add", "/import", "/export/excel", "/docx/zip", "/docx/range", "/docx/selected",
-             "/template.xlsx", "/users", "/audit", "/backup.sql"):
+             "/template.xlsx", "/users", "/audit", "/backup.sql", "/print"):
     st, _, hd = S().get(path)
     check(f"匿名拦截 {path}", st == 302 and "/login" in hd.get("Location", ""), f"{st} {hd.get('Location')}")
+st, body, _ = S().get(f"/preview/{RID}")
+check("预览页有下载 PDF 入口", f"/print/{RID}?print=1" in body)
 
 # ---------- 2. CSRF ----------
 print("[2] CSRF 防护")
@@ -527,8 +530,8 @@ check("测试数据已清理", "没有符合条件的招聘信息" in lafter)
 print("[5.8] 复制到公众号（微信排版 + 4 套配色）")
 _, lst, _ = reg.get("/")
 check("选择条有微信发布按钮", "/wechat/selected" in lst and "微信发布" in lst)
-check("选择条有三个动作按钮", lst.count('class="btn btn-primary btn-xs sel-act"')
-      + lst.count('class="btn btn-soft btn-xs sel-act"') == 3)
+check("选择条有四个动作按钮", lst.count('class="btn btn-primary btn-xs sel-act"')
+      + lst.count('class="btn btn-soft btn-xs sel-act"') == 4)
 # 全选：表头的 #pickAll 也带 .pick-box（th .pick-box 的间距样式），脚本必须只取行内复选框，
 # 否则「全选」会把自己算成一条、并被 sync() 立刻取消勾选
 check("全选脚本只作用于行内复选框", '.pick-box[name="ids"]' in lst)
@@ -658,10 +661,21 @@ check("逗号写法也认", livecomma.count('<section class="slide"') == 2)
 st, livearr, _ = reg.get(f"/live?ids={RID}&ids={lid}")
 check("重复参数写法也认", livearr.count('<section class="slide"') == 2)
 
+# 按时间段直播：不用逐条勾选，自动把该时间段内的记录全拉进来
+st, liveR, _ = reg.get("/live?start=2020-01-01&end=2030-12-31")
+check("按时间段直播 200", st == 200, st)
+check("时间段直播有多张幻灯片", liveR.count('<section class="slide"') >= 2,
+      liveR.count('<section class="slide"'))
+check("顶部显示所选时间段", 'class="scope"' in liveR and "2020-01-01 ~ 2030-12-31" in liveR)
+st, _, _ = reg.get("/live?start=1990-01-01&end=1990-01-02")
+check("空时间段跳回列表", st == 302, st)
+st, _, hd = S().get("/live?start=2020-01-01&end=2030-12-31")
+check("匿名不能按时间段直播", st == 302 and "/login" in hd.get("Location", ""), st)
+
 st, _, hd = reg.post("/live", {"_csrf": ltok})
 check("未勾选跳回列表", st == 302 and hd.get("Location", "") == "/", st)
-st, _, _ = reg.post("/live", {"_csrf": ltok, "ids": [str(i) for i in range(1, 32)]})
-check("超过 30 条被拦", st == 302, st)
+st, _, hd = reg.post("/live", {"_csrf": ltok, "ids": [str(i) for i in range(1, 302)]})
+check("超过 300 条被拦并跳回列表", st == 302 and hd.get("Location", "") == "/", st)
 st, _, _ = reg.get("/live")
 check("无 ids 跳回列表", st == 302, st)
 st, _, hd = S().get(f"/live?ids={RID}")
@@ -674,6 +688,63 @@ if lid:
     reg.post(f"/delete/{lid}", {"_csrf": csrf(reg, "/"), "back": "/"})
 _, lafter2, _ = reg.get("/?q=" + urllib.parse.quote("直播测试"))
 check("直播测试数据已清理", "直播测试公司" not in lafter2)
+
+# ---------- 5.8c 打印版（A4，浏览器里存为 PDF） ----------
+print("[5.8c] 打印版（A4，可存为 PDF）")
+_, lst, _ = reg.get("/")
+check("选择条有打印选定", 'formaction="/print"' in lst and "打印选定" in lst)
+check("日期栏有打印该时间段", "打印该时间段" in lst)
+check("工具栏有批量打印", "批量打印" in lst)
+
+# 造一条用于多页打印的记录
+st, _, _ = reg.post("/add", {
+    "_csrf": csrf(reg, "/add"), "company_name": "打印测试公司", "position": "排版员",
+    "headcount": "3", "salary": "5000-7000", "address": "打印路 1 号",
+    "phone": "13500003333", "requirements": "1. 会用 Word；\n· 有经验优先",
+})
+check("新增打印测试记录", st == 302, st)
+_, pl, _ = reg.get("/?q=" + urllib.parse.quote("打印测试"))
+m = re.search(r'data-id="(\d+)"', pl)
+pid = int(m.group(1)) if m else None
+check("拿到打印测试记录 id", pid is not None, pid)
+
+st, one, _ = reg.get(f"/print/{RID}")
+check("单条打印页 200", st == 200, st)
+check("单条打印页只有一张 A4", one.count('class="sheet"') == 1, one.count('class="sheet"'))
+check("打印页声明 A4 纸张", "@page { size: A4" in one)
+check("打印页有打印按钮", 'id="btnPrint"' in one and "window.print()" in one)
+check("打印页有大标题", "招 聘 简 章" in one)
+check("打印页有编号", "编号：ZP-" in one)
+check("打印页有表格标签", "招聘岗位" in one and "岗位要求" in one)
+check("打印页有二维码", 'src="/qr.jpg"' in one)
+check("打印页打印时按页断开", "break-after: page" in one)
+check("打印页默认不自动弹打印框", "setTimeout(function () { window.print()" not in one)
+
+st, autop, _ = reg.get(f"/print/{RID}?print=1")
+check("?print=1 自动弹打印框", "setTimeout(function () { window.print()" in autop)
+
+st, two, _ = reg.get(f"/print?ids={RID},{pid}")
+check("勾选打印 200", st == 200, st)
+check("勾选打印两条各一页", two.count('class="sheet"') == 2, two.count('class="sheet"'))
+check("勾选打印含两家单位", "打印测试公司" in two and "排版员" in two)
+
+st, rng, _ = reg.get("/print?start=2020-01-01&end=2030-12-31")
+check("按时间段打印 200", st == 200, st)
+check("按时间段打印有多页", rng.count('class="sheet"') >= 2, rng.count('class="sheet"'))
+check("按时间段打印标题带时间段", "2020-01-01 ~ 2030-12-31" in rng)
+
+st, _, hd = S().get(f"/print/{RID}")
+check("匿名也能打开单条打印页", st == 200, st)
+st, _, hd = S().get("/print")
+check("匿名不能批量打印", st == 302 and "/login" in hd.get("Location", ""), st)
+st, _, _ = reg.get("/print/999999")
+check("不存在的记录 404", st == 404, st)
+
+# 清理本节数据
+if pid:
+    reg.post(f"/delete/{pid}", {"_csrf": csrf(reg, "/"), "back": "/"})
+_, pafter, _ = reg.get("/?q=" + urllib.parse.quote("打印测试"))
+check("打印测试数据已清理", "打印测试公司" not in pafter)
 
 # ---------- 5.9 数据库备份 ----------
 print("[5.9] 管理员备份数据库为 SQL")
@@ -781,7 +852,8 @@ check("导入测试数据已清理", "导入空状态公司" not in iclean)
 # ---------- 9. 审计 ----------
 print("[9] 审计日志")
 _, au, _ = adm.get("/audit")
-for act in ("登录", "注册申请", "审批通过", "停用账号", "启用账号", "新增", "修改", "删除", "导出 Excel", "直播轮播"):
+for act in ("登录", "注册申请", "审批通过", "停用账号", "启用账号", "新增", "修改", "删除",
+            "导出 Excel", "直播轮播", "打印简章"):
     check(f"日志含「{act}」", act in au)
 
 # ---------- 10. 退出 ----------

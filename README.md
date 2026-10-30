@@ -10,6 +10,10 @@
 - 每条招聘信息生成 **单页 A4 Word 简章**（含底部二维码 + 「扫码关注，获取最新招聘信息」）
 - 批量生成 Word（ZIP）、**勾选多条导出到同一个 Word（每条一页）**、**按发布日期区间导出 Word（每条一页）**、
   导入 Excel/CSV、导出 Excel（默认全部，也可按发布日期筛选）、下载导入模板
+- **打印 / 导出 PDF**：每条一个 `PDF` 按钮、批量打印（每条一页）、打印选定、按时间段打印，
+  统一走 `/print` 的 A4 打印版，浏览器里「另存为 PDF」即得成品（详见[第六节](#六打印版pdf-是怎么出的)）
+- **直播轮播**：选好发布日期区间点「📺 直播该时间段」，该区间内的招聘信息**自动装载**循环播放，
+  不用逐条勾选；也仍支持勾选若干条。单次最多 300 条
 - **发布日期**：新增默认当天、可改；筛选 / 导出都按它比较（`publish_date` 列）
 - **序号**：列表首列按**当前页**从 1 连续编号（第 2 页从 16 起），与数据库 id 无关；
   删除 / 编辑仍按真实 id 走链接，勾选框上带 `data-id` 方便定位
@@ -51,7 +55,7 @@ cf-pages/
 │   ├── app.ts             # 路由分发、鉴权、CSRF、错误页、/setup
 │   ├── auth.ts            # PBKDF2 密码、HMAC 签名会话、CSRF、Flash、限流
 │   ├── db.ts              # D1 数据访问
-│   ├── html.ts / css.ts   # 页面模板与样式
+│   ├── html.ts / css.ts   # 页面模板与样式（含 printPage：A4 打印版，用户「另存为 PDF」）
 │   ├── docx.ts / format.ts# 单页 Word 生成 + 排版估算
 │   ├── xlsx.ts / xlsx-import.ts  # Excel 导出/模板/导入解析
 │   └── qr.ts              # 二维码 JPEG（base64 内联）
@@ -67,7 +71,7 @@ cf-pages/
 │   └── reset-local-db.mjs # 本地库建表+灌数据（不依赖 wrangler 的 D1 声明）
 ├── wrangler.toml          # 仅本地开发用；变量/机密/D1 绑定全部在控制台配（见第三节）
 ├── package.json
-└── tests/e2e.py           # 70 项端到端断言
+└── tests/e2e.py           # 308 项端到端断言
 ```
 
 ---
@@ -286,7 +290,39 @@ Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态
 
 ---
 
-## 六、与 Worker 版的差异（代码层面）
+## 六、打印版：PDF 是怎么出的
+
+Flask 版用 reportlab 在服务端直出 `.pdf`。**Cloudflare 版没有走这条路**，原因是运行时撑不住中文字体：
+
+| 尝试 | 结果 |
+| --- | --- |
+| pdf-lib + 内嵌完整宋体 | Worker 脚本体积 / 内存吃紧，冷启动明显变慢 |
+| pdf-lib `subset: true` 做子集化 | **字形大面积丢失**（页面上只剩零星几个字）。换 `@cantoo/pdf-lib`、换字体（等线 / 黑体 / 自制子集）都一样；fontkit 运行时 `createSubset()` 直接抛 `Cannot read properties of undefined (reading 'pos')` |
+| 只嵌 GB2312 一级字库 | 最小也要 ~1.3 MB，超出 Worker 单文件限制的舒适区，且二级字仍然缺 |
+
+结论：**把「PDF」交给浏览器打印引擎**。服务端只输出一个 A4 版面的 HTML（`printPage()`，见 `src/html.ts`），
+文字是矢量、体积为零、字库由用户系统提供，打印出来和 Word / PDF 版观感一致。
+
+| 入口 | 路径 | 说明 |
+| --- | --- | --- |
+| 行内 `PDF` 按钮 | `/print/:id?print=1` | 单条 A4 打印版，打开即弹打印对话框 |
+| 🖨 批量打印（每条一页） | `/print?q=…&start=…&end=…&print=1` | 当前筛选结果连续排版，`break-after: page` 保证每条严格一页 |
+| 🖨 打印该时间段 | `/print?start=…&end=…&print=1` | 按发布日期区间 |
+| 🖨 打印选定（存为 PDF） | `POST /print` → `/print?ids=…&print=1` | 勾选的多条 |
+
+打印页要点：
+
+- `@page { size: A4; margin: 14mm 13mm 12mm; }`，`.sheet` 定宽 184mm，`@media print` 里隐藏顶部操作条；
+- `?print=1` 时页面 `load` 后延迟 400ms 自动 `window.print()`，其余情况只显示「打印」按钮，方便先核对版面；
+- 单次最多 **300** 条（`MAX_PRINT`），超了提示缩小范围；
+- 批量打印会写一条审计（`打印简章`），单条不写，避免刷日志。
+
+> 用户侧的操作是：点按钮 → 浏览器打印对话框里选「目标打印机：**另存为 PDF**」→ 保存。
+> Chrome / Edge 都支持，导出的就是标准 PDF，可直接送印。
+
+---
+
+## 七、与 Worker 版的差异（代码层面）
 
 | 项目 | Worker 版 | Pages 版 |
 | --- | --- | --- |
@@ -301,13 +337,14 @@ Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态
 
 ---
 
-## 七、路由一览
+## 八、路由一览
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/` | 公开 | 列表 + 搜索 + 分页 |
-| GET | `/preview/:id` | 公开 | 网页打印预览 |
+| GET | `/preview/:id` | 公开 | 网页打印预览（工具栏带「下载 PDF」入口，指向 `/print/:id?print=1`） |
 | GET | `/docx/:id` | 公开 | 下载单页 Word |
+| GET | `/print/:id?print=1` | 登录 | 单条 A4 打印版，`print=1` 打开即弹打印对话框（另存为 PDF） |
 | GET | `/qr.jpg` | 公开 | 二维码原图 |
 | GET | `/health` | 公开 | 健康检查 |
 | GET/POST | `/login` `/register` | 公开 | 登录 / 注册申请 |
@@ -320,8 +357,9 @@ Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态
 | GET | `/export/excel` `/template.xlsx` `/docx/zip` | 登录 | 导出 Excel（可带 `start` / `end`）/ 模板 / 批量 Word |
 | GET | `/docx/range?start=&end=&show_full=&show_expired=` | 登录 | 按发布日期区间导出，范围内每条一页合并成一个 Word |
 | POST | `/docx/selected` | 登录 | 勾选的多条合并为一个 Word（每条一页） |
+| GET/POST | `/print?ids=&start=&end=&q=&show_full=&show_expired=&print=1` | 登录 | 打印版：单条 / 勾选 / 时间段，每条一页连续排版，`print=1` 自动弹打印对话框（单次最多 300 条） |
 | POST | `/wechat/selected` | 登录 | 勾选的多条生成公众号可粘贴的 HTML（单篇最多 30 条） |
-| GET/POST | `/live?ids=&interval=&logo=` | 登录 | 直播轮播：勾选的多条在手机全屏按间隔循环播放（单次最多 30 条；`logo=0` 关掉顶部台标） |
+| GET/POST | `/live?ids=&start=&end=&q=&interval=&logo=` | 登录 | 直播轮播：**按时间段自动装载**（`start`/`end`/`q`）或按勾选（`ids`），手机全屏按间隔循环播放（单次最多 300 条；`logo=0` 关掉顶部台标） |
 | GET | `/logo.jpg` | 公开 | 直播页顶部台标（`public/logo.jpg`，已在 `_routes.json` 里排除出函数） |
 | GET | `/backup.sql` | 管理员 | 整库 SQL 备份（表结构 + 索引 + 数据） |
 | GET | `/users` | 管理员 | 账号管理 |
@@ -330,7 +368,7 @@ Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态
 
 ---
 
-## 八、安全设计
+## 九、安全设计
 
 | 项目 | 做法 |
 | --- | --- |
@@ -345,7 +383,7 @@ Pages 会优先返回静态文件，`public/index.html` 会让首页变成静态
 
 ---
 
-## 九、常见问题
+## 十、常见问题
 
 **控制台 Settings → Variables and Secrets 是灰的，加不了变量 / 看不到「Add」按钮**
 说明 `wrangler.toml` 参与了线上配置。Pages 的规则是：只要配置文件里出现 `pages_build_output_dir`、

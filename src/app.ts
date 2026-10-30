@@ -6,8 +6,9 @@
  *
  * 路由：
  *   公开：/  /preview/:id  /docx/:id  /qr.jpg  /login  /register
+ *   公开（另）：/print/:id 单条 A4 打印版
  *   需登录：/add /edit/:id /delete/:id /import /export/excel /docx/zip /docx/range
- *           /docx/selected /wechat/selected /live /template.xlsx /password
+ *           /docx/selected /wechat/selected /live /print /template.xlsx /password
  *   需管理员：/users /users/:id/action /audit /backup.sql
  */
 import { zipSync } from 'fflate';
@@ -17,9 +18,9 @@ import * as pages from './html';
 import { buildDocx, buildDocxMulti, qrBytes } from './docx';
 import { exportXlsx, buildTemplate } from './xlsx';
 import { parseImport } from './xlsx-import';
-import { FIELD_NAMES, STATUS_LABELS, dateRange, docFilename, effStatus, multiDocFilename, normStatus,
-  nowLocal, prepare, rangeDocFilename, rangeLabel, rangeXlsxFilename, todayIso,
-  toIsoDate } from './format';
+import { FIELD_NAMES, STATUS_LABELS, dateRange, docFilename, effStatus, fmtHeadcount, fmtSalary,
+  multiDocFilename, normStatus, nowLocal, prepare, rangeDocFilename, rangeLabel,
+  rangeXlsxFilename, todayIso, toIsoDate } from './format';
 import { buildWechatVariants, WECHAT_THEMES } from './wechat';
 import { CSS } from './css';
 
@@ -30,7 +31,8 @@ const MAX_REG_PER_HOUR = 5;
 const MAX_SELECTED = 200;         // 单次「导出选定为 Word」最大条数
 const MAX_RANGE = 300;            // 单次「按日期导出 Word」最大条数
 const MAX_WECHAT = 30;            // 单次「复制微信发布」最大条数（一篇推文不宜过长）
-const MAX_LIVE = 30;              // 单次「直播轮播」最大条数
+const MAX_LIVE = 300;             // 单次「直播轮播」最大条数（按时间段直播时同样适用）
+const MAX_PRINT = 300;            // 单次「打印版」最多条数
 const LIVE_INTERVALS = [3, 5, 8, 10, 15, 20, 30, 45, 60];   // 直播页可选的切换间隔（秒）
 const LIVE_DEFAULT_INTERVAL = 8;
 const PER_CHOICES = [15, 30, 50, 100];   // 列表页可选的每页条数
@@ -247,7 +249,7 @@ async function route(c: Ctx): Promise<Response> {
   // ---- 需要登录 ----
   const needLogin = [
     '/add', '/import', '/export/excel', '/docx/zip', '/docx/range', '/docx/selected',
-    '/wechat/selected', '/live', '/template.xlsx', '/password', '/backup.sql',
+    '/wechat/selected', '/live', '/print', '/template.xlsx', '/password', '/backup.sql',
   ];
   const isProtected = needLogin.includes(pathname)
     || /^\/edit\/\d+$/.test(pathname) || /^\/delete\/\d+$/.test(pathname)
@@ -286,6 +288,9 @@ async function route(c: Ctx): Promise<Response> {
   }
   if (pathname === '/live') {
     return handleLive(c, method === 'POST' ? form! : null);
+  }
+  if (pathname === '/print' || /^\/print\/\d+$/.test(pathname)) {
+    return handlePrint(c);
   }
   if (pathname === '/backup.sql') return handleBackup(c);
 
@@ -747,48 +752,162 @@ function liveItems(rows: any[]): pages.LiveItem[] {
 }
 
 /**
- * 直播轮播页（需登录）：勾选的招聘信息在手机上按设定间隔循环播放。
- * 入口是列表页的「📺 直播轮播」按钮（POST），拿到 ids 后 302 到 GET 版本，
- * 这样地址栏里的 ?ids=1,2,3&interval=8 可以直接收藏 / 换手机打开。
+ * 直播轮播页（需登录）：招聘信息在手机上按设定间隔循环播放。
+ *
+ * 两种进法：
+ *   1. 勾选后点「📺 直播轮播」（POST）→ 302 到 GET /live?ids=1,2,3&interval=8；
+ *   2. 按发布日期筛好后点「📺 直播该时间段」→ /live?start=&end=&interval=8，
+ *      自动把该时间段里的招聘信息全部拉进来循环播放，不用逐条勾。
+ * 两种写法都落到 GET，地址栏里的参数可以直接收藏 / 换手机打开。
  */
 async function handleLive(c: Ctx, form: FormData | null): Promise<Response> {
   if (c.req.method === 'POST') {
     const ids = collectIds(form!);
-    if (!ids.length) {
-      await flash(c, 'error', '请先勾选要直播轮播的招聘信息');
-      return redirect(c, '/');
+    if (ids.length) {
+      if (ids.length > MAX_LIVE) {
+        await flash(c, 'error', `一次最多轮播 ${MAX_LIVE} 条，请分批勾选（当前 ${ids.length} 条）`);
+        return redirect(c, '/');
+      }
+      const iv = pickInterval(form!.get('interval'));
+      return redirect(c, `/live?ids=${ids.join(',')}&interval=${iv}`);
     }
-    if (ids.length > MAX_LIVE) {
-      await flash(c, 'error', `一次最多轮播 ${MAX_LIVE} 条，请分批勾选（当前 ${ids.length} 条）`);
-      return redirect(c, '/');
+    const start = String(form!.get('start') || '').trim();
+    const end = String(form!.get('end') || '').trim();
+    if (start || end) {
+      const p = new URLSearchParams();
+      if (start) p.set('start', start);
+      if (end) p.set('end', end);
+      const q = String(form!.get('q') || '').trim();
+      if (q) p.set('q', q);
+      p.set('interval', String(pickInterval(form!.get('interval'))));
+      return redirect(c, `/live?${p.toString()}`);
     }
-    const iv = pickInterval(form!.get('interval'));
-    return redirect(c, `/live?ids=${ids.join(',')}&interval=${iv}`);
-  }
-
-  const ids = queryIds(c.url);
-  if (!ids.length) {
-    await flash(c, 'error', '请先在列表里勾选招聘信息，再点「直播轮播」');
-    return redirect(c, '/');
-  }
-  if (ids.length > MAX_LIVE) {
-    await flash(c, 'error', `一次最多轮播 ${MAX_LIVE} 条，请分批勾选（当前 ${ids.length} 条）`);
-    return redirect(c, '/');
-  }
-
-  const rows = await db.getRecruitsByIds(c.env.DB, ids);
-  if (!rows.length) {
-    await flash(c, 'error', '勾选的招聘信息已不存在，请刷新页面后重试');
+    await flash(c, 'error', '请先在列表里勾选招聘信息，或先按发布日期筛选时间段');
     return redirect(c, '/');
   }
 
   const interval = pickInterval(c.url.searchParams.get('interval'));
-  await audit(c, '直播轮播',
-    `共 ${rows.length} 条，间隔 ${interval} 秒（编号 ${rows.map((r: any) => r.id).join(',')}）`);
+  const ids = queryIds(c.url);
+  const q = (c.url.searchParams.get('q') || '').trim();
+  const { start, end } = dateRange(c.url.searchParams.get('start'), c.url.searchParams.get('end'));
+  const showFull = c.url.searchParams.get('show_full') === '1';
+  const showExpired = c.url.searchParams.get('show_expired') === '1';
+
+  let rows: any[];
+  let label = '';
+  let scope: string;
+
+  if (ids.length) {
+    if (ids.length > MAX_LIVE) {
+      await flash(c, 'error', `一次最多轮播 ${MAX_LIVE} 条，请分批勾选（当前 ${ids.length} 条）`);
+      return redirect(c, '/');
+    }
+    rows = await db.getRecruitsByIds(c.env.DB, ids);
+    if (!rows.length) {
+      await flash(c, 'error', '勾选的招聘信息已不存在，请刷新页面后重试');
+      return redirect(c, '/');
+    }
+    scope = `编号 ${rows.map((r: any) => r.id).join(',')}`;
+  } else if (start || end || q || showFull || showExpired) {
+    rows = await db.listAllRecruit(c.env.DB, q, start, end, showFull, showExpired);
+    if (!rows.length) {
+      await flash(c, 'error', `所选时间段内没有招聘信息（${rangeLabel(start, end)}）`);
+      return redirect(c, '/');
+    }
+    if (rows.length > MAX_LIVE) {
+      await flash(c, 'error',
+        `该时间段共 ${rows.length} 条，一次最多轮播 ${MAX_LIVE} 条，请缩小时间段后重试`);
+      return redirect(c, '/');
+    }
+    label = rangeLabel(start, end) + (q ? `（关键词：${q}）` : '');
+    scope = `时间段 ${rangeLabel(start, end)}`;
+  } else {
+    await flash(c, 'error', '请先在列表里勾选招聘信息，或按发布日期筛选时间段');
+    return redirect(c, '/');
+  }
+
+  await audit(c, '直播轮播', `共 ${rows.length} 条，间隔 ${interval} 秒（${scope}）`);
   return htmlRes(c, pages.livePage({
     items: liveItems(rows), interval, choices: LIVE_INTERVALS, backUrl: '/',
     logo: flag(c.url.searchParams.get('logo')),
+    rangeLabel: label,
   }));
+}
+
+/**
+ * 打印版（A4，每条一页）：/print/:id 单条、/print?ids= 勾选、/print?start=&end= 时间段。
+ * 浏览器里「打印 → 另存为 PDF」就能得到可直接打印的 PDF；
+ * Cloudflare 运行时塞不下中文字体，所以 PDF 交给浏览器排版（矢量文字，打印质量最好）。
+ */
+async function handlePrint(c: Ctx): Promise<Response> {
+  const one = /^\/print\/(\d+)$/.exec(c.url.pathname);
+  let rows: any[] = [];
+  let subtitle = '';
+
+  if (one) {
+    const rec = await db.getRecruit(c.env.DB, Number(one[1]));
+    if (!rec) return htmlRes(c, pages.errorPage(layoutOpts(c, '找不到该记录'), 404, '找不到该记录', '这条招聘信息可能已经被删除了。'), 404);
+    rows = [rec];
+    subtitle = '单条打印';
+  } else {
+    const ids = queryIds(c.url);
+    if (ids.length) {
+      if (ids.length > MAX_PRINT) {
+        await flash(c, 'error', `一次最多打印 ${MAX_PRINT} 条，请分批勾选（当前 ${ids.length} 条）`);
+        return redirect(c, '/');
+      }
+      rows = await db.getRecruitsByIds(c.env.DB, ids);
+      subtitle = `已选 ${rows.length} 条`;
+    } else {
+      const q = (c.url.searchParams.get('q') || '').trim();
+      const { start, end } = dateRange(c.url.searchParams.get('start'), c.url.searchParams.get('end'));
+      const showFull = c.url.searchParams.get('show_full') === '1';
+      const showExpired = c.url.searchParams.get('show_expired') === '1';
+      rows = await db.listAllRecruit(c.env.DB, q, start, end, showFull, showExpired);
+      subtitle = `${rangeLabel(start, end)} · 共 ${rows.length} 条`;
+    }
+    if (!rows.length) {
+      await flash(c, 'error', '没有可打印的招聘信息');
+      return redirect(c, '/');
+    }
+  }
+
+  if (rows.length > MAX_PRINT) {
+    await flash(c, 'error', `一次最多打印 ${MAX_PRINT} 条，请缩小范围后重试（当前 ${rows.length} 条）`);
+    return redirect(c, '/');
+  }
+
+  if (!one) await audit(c, '打印简章', `${subtitle}（编号 ${rows.map((r: any) => r.id).join(',')}）`);
+  return htmlRes(c, pages.printPage({
+    items: rows.map(printItem),
+    subtitle,
+    backUrl: '/',
+    qrUrl: '/qr.jpg',
+    autoPrint: c.url.searchParams.get('print') === '1',
+  }));
+}
+
+/** 打印页用的数据：编号按发布年份生成，岗位要求按行拆开 */
+function printItem(r: any): pages.PrintItem {
+  const g = (k: string) => (r?.[k] === null || r?.[k] === undefined ? '' : String(r[k])).trim();
+  const created = g('created_at');
+  const year = /^\d{4}/.test(created) ? created.slice(0, 4) : String(new Date().getFullYear());
+  const lines = g('requirements').split(/\r?\n/)
+    .map((s) => s.trim().replace(/^[·•\-—　\s]+/, ''))
+    .filter(Boolean);
+  const st = String(r.eff_status || effStatus(r, todayIso()));
+  return {
+    id: Number(r.id) || 0,
+    no: `ZP-${year}-${String(Number(r.id) || 0).padStart(4, '0')}`,
+    company: g('company_name') || '用人单位',
+    position: g('position') || '—',
+    headcount: fmtHeadcount(r.headcount),
+    salary: fmtSalary(r.salary),
+    address: g('address') || '—',
+    phone: g('phone') || '—',
+    reqLines: lines.length ? lines : ['详见面谈。'],
+    statusLabel: STATUS_LABELS[st] || '招聘中',
+  };
 }
 
 /**
