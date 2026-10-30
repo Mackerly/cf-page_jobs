@@ -19,8 +19,8 @@ import { buildDocx, buildDocxMulti, qrBytes } from './docx';
 import { exportXlsx, buildTemplate } from './xlsx';
 import { parseImport } from './xlsx-import';
 import { FIELD_NAMES, STATUS_LABELS, dateRange, docFilename, effStatus, fmtHeadcount, fmtSalary,
-  multiDocFilename, normStatus, nowLocal, prepare, rangeDocFilename, rangeLabel,
-  rangeXlsxFilename, todayIso, toIsoDate } from './format';
+  multiDocFilename, normStatus, nowLocal, parseDateParts, prepare, rangeDocFilename, rangeLabel,
+  rangeXlsxFilename, todayIso, todayLocal, toIsoDate } from './format';
 import { buildWechatVariants, WECHAT_THEMES } from './wechat';
 import { CSS } from './css';
 
@@ -887,18 +887,18 @@ async function handlePrint(c: Ctx): Promise<Response> {
   }));
 }
 
-/** 打印页用的数据：编号按发布年份生成，岗位要求按行拆开 */
+/** 打印页用的数据：编号按发布年份生成，岗位要求按行拆开，落款日期用记录自己的发布日期 */
 function printItem(r: any): pages.PrintItem {
   const g = (k: string) => (r?.[k] === null || r?.[k] === undefined ? '' : String(r[k])).trim();
-  const created = g('created_at');
-  const year = /^\d{4}/.test(created) ? created.slice(0, 4) : String(new Date().getFullYear());
   const lines = g('requirements').split(/\r?\n/)
     .map((s) => s.trim().replace(/^[·•\-—　\s]+/, ''))
     .filter(Boolean);
   const st = String(r.eff_status || effStatus(r, todayIso()));
+  // 和 prepare() 保持同一套回退顺序：发布日期 → 录入时间 → 今天
+  const publish = parseDateParts(g('publish_date')) || parseDateParts(g('created_at')) || todayLocal();
   return {
     id: Number(r.id) || 0,
-    no: `ZP-${year}-${String(Number(r.id) || 0).padStart(4, '0')}`,
+    no: `ZP-${publish.year}-${String(Number(r.id) || 0).padStart(4, '0')}`,
     company: g('company_name') || '用人单位',
     position: g('position') || '—',
     headcount: fmtHeadcount(r.headcount),
@@ -907,6 +907,7 @@ function printItem(r: any): pages.PrintItem {
     phone: g('phone') || '—',
     reqLines: lines.length ? lines : ['详见面谈。'],
     statusLabel: STATUS_LABELS[st] || '招聘中',
+    dateText: `${publish.year} 年 ${publish.month} 月 ${publish.day} 日`,
   };
 }
 

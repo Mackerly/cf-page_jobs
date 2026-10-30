@@ -117,6 +117,13 @@ def xlsx_text(blob):
     return z.read("xl/worksheets/sheet1.xml").decode("utf-8", "replace")
 
 
+def docx_text(blob):
+    """把 .docx 里的文字抠出来（不依赖 python-docx）：拼接所有 <w:t>"""
+    z = zipfile.ZipFile(io.BytesIO(blob))
+    xml = z.read("word/document.xml").decode("utf-8", "replace")
+    return "".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", xml))
+
+
 def docx_pages(blob):
     """返回 (信息表数量, 分页符数量)：表数=条数，分页符=条数-1"""
     z = zipfile.ZipFile(io.BytesIO(blob))
@@ -745,6 +752,48 @@ if pid:
     reg.post(f"/delete/{pid}", {"_csrf": csrf(reg, "/"), "back": "/"})
 _, pafter, _ = reg.get("/?q=" + urllib.parse.quote("打印测试"))
 check("打印测试数据已清理", "打印测试公司" not in pafter)
+
+# ---------- 5.8d 落款日期用发布日期（不是生成当天）----------
+print("[5.8d] 落款「发布日期」取记录自己的发布日期")
+st, _, _ = reg.post("/add", {
+    "_csrf": csrf(reg, "/add"), "company_name": "旧简章公司", "position": "老岗位",
+    "headcount": "1", "salary": "3000", "address": "老地址", "phone": "13600004444",
+    "requirements": "能吃苦", "publish_date": "2026-03-05", "status": "active",
+})
+check("新增旧日期记录", st == 302, st)
+# 发布满 1 个月会自动失效，查这条要显式把「已失效」也列出来
+_, ol, _ = reg.get("/?q=" + urllib.parse.quote("旧简章") + "&start=2026-03-05&end=2026-03-05"
+                     + "&show_full=1&show_expired=1")
+om = re.search(r'data-id="(\d+)"', ol)
+oid = int(om.group(1)) if om else None
+check("拿到旧日期记录 id", oid is not None, oid)
+
+if oid:
+    _t = time.localtime()
+    _today_cn = f"{_t.tm_year}年{_t.tm_mon}月{_t.tm_mday}日"
+    st, blob, _ = reg.get_raw(f"/docx/{oid}")
+    dtxt = docx_text(blob)
+    check("Word 落款是发布日", "发布日期：2026 年 3 月 5 日" in dtxt,
+          [x for x in dtxt.split("发布日期")[1:]])
+    check("Word 编号年份跟发布日", "编号：ZP-2026-" in dtxt)
+    check("Word 落款不是今天",
+          f"发布日期：{_t.tm_year} 年 {_t.tm_mon} 月 {_t.tm_mday} 日" not in dtxt)
+
+    st, op, _ = reg.get(f"/print/{oid}")
+    check("打印版落款是发布日", "发布日期：2026 年 3 月 5 日" in op)
+    st, pv, _ = reg.get(f"/preview/{oid}")
+    check("预览页落款是发布日", "发布日期：2026 年 3 月 5 日" in pv)
+
+    st, wx, _ = reg.post("/wechat/selected", {"_csrf": csrf(reg, "/"), "ids": [str(oid)]})
+    check("微信排版 200", st == 200, st)
+    check("微信头部用发布日", "2026年3月5日" in wx)
+    check("微信头部不是今天", _today_cn not in wx)
+
+    reg.post(f"/delete/{oid}", {"_csrf": csrf(reg, "/"), "back": "/"})
+    _, oa, _ = reg.get("/?q=" + urllib.parse.quote("旧简章") + "&start=2026-03-05&end=2026-03-05"
+                      + "&show_full=1&show_expired=1")
+    # 只认这一条的 id：早先失败的运行可能留下同名残留，用公司名判断会误报
+    check("旧日期测试数据已清理", f'data-id="{oid}"' not in oa)
 
 # ---------- 5.9 数据库备份 ----------
 print("[5.9] 管理员备份数据库为 SQL")

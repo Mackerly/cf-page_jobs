@@ -875,6 +875,8 @@ export interface PrintItem {
   phone: string;
   reqLines: string[];
   statusLabel: string;
+  /** 落款「发布日期」：该记录自己的发布日期，已格式化为「2026 年 3 月 5 日」 */
+  dateText: string;
 }
 
 export function printPage(o: {
@@ -888,8 +890,6 @@ export function printPage(o: {
 }): string {
   const back = o.backUrl || '/';
   const qr = o.qrUrl || '/qr.jpg';
-  const today = new Date();
-  const dateText = `${today.getFullYear()} 年 ${today.getMonth() + 1} 月 ${today.getDate()} 日`;
 
   const sheets = o.items.map((it) => `
 <section class="sheet">
@@ -908,7 +908,7 @@ export function printPage(o: {
   </table>
   <p class="closing">有意应聘者请携带本人身份证及相关证件，于工作日到上述地址报名面试，或来电咨询。本简章长期有效，招满为止。</p>
   <p class="sign">发布单位：${h(it.company)}（盖章）</p>
-  <p class="sign">发布日期：${dateText}</p>
+  <p class="sign">发布日期：${h(it.dateText)}</p>
   <div class="qr"><img src="${h(qr)}" alt="二维码"><div>扫码关注，获取最新招聘信息</div></div>
   <div class="foot">— 本招聘简章最终解释权归用人单位所有 —</div>
 </section>`).join('\n');
@@ -1776,7 +1776,7 @@ export function previewPage(info: DocInfo, user: UserLike | null): string {
   </table>
   <p class="note">有意应聘者请携带本人身份证及相关证件，于工作日到上述地址报名面试，或来电咨询。本简章长期有效，招满为止。</p>
   <p class="sign">发布单位：${h(info.company)}（盖章）</p>
-  <p class="sign">发布日期：${info.today.year} 年 ${info.today.month} 月 ${info.today.day} 日</p>
+  <p class="sign">发布日期：${info.publish.year} 年 ${info.publish.month} 月 ${info.publish.day} 日</p>
   ${info.hasQr ? `<div class="qr-block"><img src="/qr.jpg" alt="扫码关注"><p>${h(QR_CAPTION)}</p></div>` : ''}
   <p class="foot-note">— 本招聘简章最终解释权归用人单位所有 —</p>
 </div></div>

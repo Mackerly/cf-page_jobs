@@ -118,10 +118,29 @@ function recordBlock(idx: number, info: DocInfo, t: WechatTheme): string {
   return out.join('\n');
 }
 
+/**
+ * 头部日期取这批记录自己的发布日期（不是今天）：
+ * 全部同一天 → 「2026年10月30日」；跨天 → 「2026年10月1日—10月30日」；
+ * 跨月补月份、跨年补年份；一条都没有发布日期才退回 `fallback`。
+ */
+function dateTextOf(infos: DocInfo[], fallback: Date): string {
+  const ds = infos.map((i) => i.publish).filter(Boolean)
+    .sort((a, b) => (a.year - b.year) || (a.month - b.month) || (a.day - b.day));
+  if (!ds.length) return fmtDate(fallback);
+  const one = (d: { year: number; month: number; day: number }) => `${d.year}年${d.month}月${d.day}日`;
+  const lo = ds[0];
+  const hi = ds[ds.length - 1];
+  if (lo.year === hi.year && lo.month === hi.month && lo.day === hi.day) return one(lo);
+  if (lo.year !== hi.year) return `${one(lo)}—${one(hi)}`;
+  if (lo.month !== hi.month) return `${lo.year}年${lo.month}月${lo.day}日—${hi.month}月${hi.day}日`;
+  return `${lo.year}年${lo.month}月${lo.day}日—${hi.day}日`;
+}
+
 export interface WechatOpts {
   title?: string;
   footer?: string;
   showDivider?: boolean;
+  /** 这批记录一条发布日期都没有时的兜底日期（默认今天） */
   now?: Date;
   theme?: string;
 }
@@ -143,7 +162,7 @@ export function buildWechatHtml(infos: DocInfo[], opts: WechatOpts = {}): string
   out.push(`    <p style="margin:0;font-size:19px;font-weight:bold;color:${t.brand};`
     + `letter-spacing:2px;">${esc(title)}</p>`);
   out.push(`    <p style="margin:8px 0 0;font-size:12px;color:${t.soft};">`
-    + `共 ${infos.length} 个岗位 · ${fmtDate(opts.now || new Date())}</p>`);
+    + `共 ${infos.length} 个岗位 · ${dateTextOf(infos, opts.now || new Date())}</p>`);
   out.push('  </section>');
 
   infos.forEach((info, i) => {

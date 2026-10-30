@@ -239,6 +239,19 @@ export function chooseFont(simple: string[], req: string, hasQr: boolean): numbe
   return FONT_CHOICES[FONT_CHOICES.length - 1];
 }
 
+export interface DateParts { year: number; month: number; day: number }
+
+/** 'YYYY-MM-DD' / 'YYYY-MM-DD 09:12:00' → { year, month, day }；认不出返回 null */
+export function parseDateParts(raw: string): DateParts | null {
+  const s = String(raw ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return null;
+  const year = Number(s.slice(0, 4));
+  const month = Number(s.slice(5, 7));
+  const day = Number(s.slice(8, 10));
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { year, month, day };
+}
+
 export interface DocInfo {
   id: number;
   company: string;
@@ -253,10 +266,11 @@ export interface DocInfo {
   hasQr: boolean;
   bodyPt: number;
   year: number;
-  today: { year: number; month: number; day: number };
+  /** 落款「发布日期」用的日期：记录自己的 publish_date，不是生成当天 */
+  publish: DateParts;
 }
 
-/** 把一条记录整理成排版所需的展示数据（Word / 网页预览共用） */
+/** 把一条记录整理成排版所需的展示数据（Word / 打印版 / 网页预览 / 微信共用） */
 export function prepare(rec: Record<string, any>, hasQr: boolean): DocInfo {
   const g = (k: string) => (rec?.[k] === null || rec?.[k] === undefined ? '' : String(rec[k]));
   const company = g('company_name').trim() || '用人单位';
@@ -270,14 +284,15 @@ export function prepare(rec: Record<string, any>, hasQr: boolean): DocInfo {
 
   const bodyPt = chooseFont([position, headcount, salary, address, phone], requirements, hasQr);
   const reqLines = requirements.split(/\r?\n/).map((s) => s.replace(/\s+$/, '')).filter((s) => s.trim());
-  const today = todayLocal();
-  const year = /^\d{4}-\d{2}-\d{2}/.test(created) ? Number(created.slice(0, 4)) : today.year;
+  // 落款日期取记录自己的发布日期：补录 / 补打旧简章时，纸上必须是当初的发布日期。
+  // 没有发布日期才退回录入时间，再退回今天。编号年份也跟着它走，避免自相矛盾。
+  const publish = parseDateParts(g('publish_date')) || parseDateParts(created) || todayLocal();
 
   return {
     id: Number(rec?.id) || 0,
     company, position, headcount, salary, address, phone, requirements,
     reqLines: reqLines.length ? reqLines : [requirements],
-    created, hasQr, bodyPt, year, today,
+    created, hasQr, bodyPt, year: publish.year, publish,
   };
 }
 

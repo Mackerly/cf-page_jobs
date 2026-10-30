@@ -71,7 +71,7 @@ cf-pages/
 │   └── reset-local-db.mjs # 本地库建表+灌数据（不依赖 wrangler 的 D1 声明）
 ├── wrangler.toml          # 仅本地开发用；变量/机密/D1 绑定全部在控制台配（见第三节）
 ├── package.json
-└── tests/e2e.py           # 308 项端到端断言
+└── tests/e2e.py           # 319 项端到端断言
 ```
 
 ---
@@ -312,6 +312,8 @@ Flask 版用 reportlab 在服务端直出 `.pdf`。**Cloudflare 版没有走这�
 
 打印页要点：
 
+- **落款「发布日期」用记录自己的 `publish_date`**（`prepare()` / `printItem()` 统一处理，
+  回退顺序：发布日期 → 录入时间 → 今天），编号年份也跟着它走；补打旧简章不会印成当天；
 - `@page { size: A4; margin: 14mm 13mm 12mm; }`，`.sheet` 定宽 184mm，`@media print` 里隐藏顶部操作条；
 - `?print=1` 时页面 `load` 后延迟 400ms 自动 `window.print()`，其余情况只显示「打印」按钮，方便先核对版面；
 - 单次最多 **300** 条（`MAX_PRINT`），超了提示缩小范围；

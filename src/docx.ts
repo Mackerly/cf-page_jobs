@@ -267,7 +267,7 @@ ${rows.join('')}
     size: bodyPt, align: 'right', before: 8, line: bodyPt * 1.5, keepNext: true,
   }));
   blocks.push(para({
-    text: `发布日期：${info.today.year} 年 ${info.today.month} 月 ${info.today.day} 日`,
+    text: `发布日期：${info.publish.year} 年 ${info.publish.month} 月 ${info.publish.day} 日`,
     size: bodyPt, align: 'right', line: bodyPt * 1.5, keepNext: info.hasQr,
   }));
 
