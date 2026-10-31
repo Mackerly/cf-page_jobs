@@ -65,13 +65,14 @@ cf-pages/
 │   ├── robots.txt
 │   ├── _headers           # 静态资源的响应头
 │   └── _routes.json       # 把静态资源排除出函数路由（关键！）
+├── migrations/            # 增量迁移（001 发布日期 / 002 状态 / 003 账号类型+页眉）
 ├── schema.sql             # 建表脚本
 ├── seed.sql               # 演示数据（admin/admin123 + 3 条示例）
 ├── scripts/
 │   └── reset-local-db.mjs # 本地库建表+灌数据（不依赖 wrangler 的 D1 声明）
 ├── wrangler.toml          # 仅本地开发用；变量/机密/D1 绑定全部在控制台配（见第三节）
 ├── package.json
-└── tests/e2e.py           # 321 项端到端断言
+└── tests/e2e.py           # 370 项端到端断言
 ```
 
 ---
@@ -332,6 +333,36 @@ Flask 版用 reportlab 在服务端直出 `.pdf`。**Cloudflare 版没有走这�
 
 ---
 
+## 六点五、账号类型与导出页眉
+
+**账号类型**（`users.role`，四种）：
+
+| 类型 | 取值 | 看全部 | 改招聘信息 | 用户管理 | 系统设置 |
+| --- | --- | --- | --- | --- | --- |
+| 超级管理员 | `super` | ✅ | ✅ 全部 | ✅ | ✅ |
+| 管理员 | `admin` | ✅ | ✅ 全部 | ✅ | ❌ |
+| 乡镇职达站 | `town` | ✅ | 只改自己发布的 | ❌ | ❌ |
+| 企业 | `enterprise` | ✅ | 只改自己发布的 | ❌ | ❌ |
+
+- 新增 / 导入时把当前登录账号写进 `recruit.owner_id`；列表里每条记录下方显示**发布人**，
+  别人的记录操作列显示 `🔒 只读`，直接访问 `/edit/:id`、POST `/delete/:id` 也会被拦；
+- 老数据 `owner_id = 0`，只有管理员能动；
+- 超级管理员在用户管理页用下拉框改类型（`action=setrole`），
+  只有超级管理员能设置 / 取消「超级管理员」，且不能改自己的类型；
+- **老库升级**：执行一次 `npm run db:migrate:roles`
+  （即 `migrations/003_owner_role.sql`，补 `owner_id` 列 + `settings` 表 + 旧角色迁移）。
+
+**导出页眉**：默认「炎陵县就业职达站」，存在 `settings.header_text`，
+没配置时用 `src/db.ts` 里的 `DEFAULT_HEADER` 兜底。
+
+- Word：真正的 `word/header1.xml` 部件（9pt 深灰 + 细底边线），
+  `w:headerReference` 放在 `w:sectPr` 第一个子元素位置，`w:pBdr` 排在 `w:jc` 之前，
+  否则 Word 会报文档损坏；`header` 距边 567 twips < 上边距 1134 twips，不挤正文；
+- 打印版 / 预览页：`.page-hdr`（`em` 单位，跟着 `fitSheets()` 一起缩放）；
+- 改法：超级管理员 → 导航「系统设置」→ 改「页眉文字」→ 保存，最多 60 字，留空回落默认。
+
+---
+
 ## 七、与 Worker 版的差异（代码层面）
 
 | 项目 | Worker 版 | Pages 版 |
@@ -375,6 +406,7 @@ Flask 版用 reportlab 在服务端直出 `.pdf`。**Cloudflare 版没有走这�
 | GET | `/users` | 管理员 | 账号管理 |
 | POST | `/users/:id/action` | 管理员 | 审批/停用/启用/改角色/重置密码/删除 |
 | GET | `/audit` | 管理员 | 审计日志 |
+| GET/POST | `/settings` | 超级管理员 | 系统设置：导出简章的页眉文字（Word / PDF / 打印版 / 预览页统一生效） |
 
 ---
 
@@ -387,7 +419,8 @@ Flask 版用 reportlab 在服务端直出 `.pdf`。**Cloudflare 版没有走这�
 | CSRF | 双提交 Cookie + 所有 POST 校验 `_csrf`，常数时间比较 |
 | XSS | 输出统一经 `h()` 转义 |
 | 响应头 | `X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy` |
-| 越权 | 受保护路由先校验会话状态，管理员路由再校验角色 |
+| 越权 | 受保护路由先校验会话状态，管理员路由再校验角色；`/settings` 只认超级管理员 |
+| 归属 | 乡镇职达站 / 企业只能改自己发布的招聘信息（按 `recruit.owner_id` 判断），越权直接拦回列表 |
 | 暴力破解 | 同 IP + 账号 15 分钟 5 次失败锁定 |
 | 审计 | 登录、注册、审批、增删改、导入导出、批量生成全部留痕 |
 

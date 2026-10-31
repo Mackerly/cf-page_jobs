@@ -18,9 +18,11 @@ import * as pages from './html';
 import { buildDocx, buildDocxMulti, qrBytes } from './docx';
 import { exportXlsx, buildTemplate } from './xlsx';
 import { parseImport } from './xlsx-import';
-import { FIELD_NAMES, STATUS_LABELS, dateRange, docFilename, effStatus, fmtHeadcount, fmtSalary,
-  multiDocFilename, normStatus, nowLocal, parseDateParts, prepare, rangeDocFilename, rangeLabel,
-  rangeXlsxFilename, todayIso, todayLocal, toIsoDate } from './format';
+import { FIELD_NAMES, ROLE_ADMIN, ROLE_ENTERPRISE, ROLE_LABELS, ROLE_SUPER, ROLES, SELF_ROLES,
+  STATUS_LABELS, canEditRec,
+  dateRange, docFilename, effStatus, fmtHeadcount, fmtSalary, isManager, isSuperRole,
+  multiDocFilename, normRole, normStatus, nowLocal, parseDateParts, prepare, rangeDocFilename,
+  rangeLabel, rangeXlsxFilename, roleLabel, todayIso, todayLocal, toIsoDate } from './format';
 import { buildWechatVariants, WECHAT_THEMES } from './wechat';
 import { CSS } from './css';
 
@@ -46,7 +48,8 @@ interface Ctx {
   url: URL;
   jar: string[];
   user: db.UserRow | null;
-  isAdmin: boolean;
+  isAdmin: boolean;      // 管理员或超级管理员
+  isSuper: boolean;      // 仅超级管理员
   pending: number;
   csrf: string;
   allowRegister: boolean;
@@ -102,7 +105,7 @@ function layoutOpts(c: Ctx, title: string, active?: string): pages.LayoutOpts {
   return {
     title: title.split(DEFAULT_SITE_NAME).join(siteName),
     siteName,
-    csrf: c.csrf, user: c.user, isAdmin: c.isAdmin,
+    csrf: c.csrf, user: c.user, isAdmin: c.isAdmin, isSuper: c.isSuper,
     pendingCount: c.pending, allowRegister: c.allowRegister,
     flashes: c.flashes, active, maxWechat: MAX_WECHAT, maxLive: MAX_LIVE,
   };
@@ -148,7 +151,7 @@ export async function handleRequest(req: Request, env: db.Env): Promise<Response
 
   const c: Ctx = {
     req, env, url, jar,
-    user: null, isAdmin: false, pending: 0,
+    user: null, isAdmin: false, isSuper: false, pending: 0,
     csrf: '', allowRegister: (env.ALLOW_REGISTER ?? 'true') !== 'false',
     flashes: [], ip, secret,
   };
@@ -159,7 +162,8 @@ export async function handleRequest(req: Request, env: db.Env): Promise<Response
     const u = await db.getUserById(env.DB, uid);
     if (u && u.status === 'active') {
       c.user = u;
-      c.isAdmin = u.role === 'admin';
+      c.isAdmin = isManager(u.role);
+      c.isSuper = isSuperRole(u.role);
       if (c.isAdmin) c.pending = await db.pendingCount(env.DB);
     } else {
       auth.clearSession(jar);
@@ -250,6 +254,7 @@ async function route(c: Ctx): Promise<Response> {
   const needLogin = [
     '/add', '/import', '/export/excel', '/docx/zip', '/docx/range', '/docx/selected',
     '/wechat/selected', '/live', '/print', '/template.xlsx', '/password', '/backup.sql',
+    '/settings',
   ];
   const isProtected = needLogin.includes(pathname)
     || /^\/edit\/\d+$/.test(pathname) || /^\/delete\/\d+$/.test(pathname)
@@ -293,6 +298,14 @@ async function route(c: Ctx): Promise<Response> {
     return handlePrint(c);
   }
   if (pathname === '/backup.sql') return handleBackup(c);
+
+  if (pathname === '/settings') {
+    if (!c.isSuper) {
+      await flash(c, 'error', '只有超级管理员才能访问该页面');
+      return redirect(c, '/');
+    }
+    return method === 'POST' ? handleSettingsPost(c, form!) : handleSettingsGet(c);
+  }
 
   if (pathname === '/password') {
     return method === 'POST' ? handlePasswordPost(c, form!) : handlePasswordGet(c);
@@ -369,7 +382,7 @@ async function handleSetup(c: Ctx, form: FormData | null): Promise<Response> {
   const iterations = Number(c.env.PBKDF2_ITERATIONS || 100000);
   const { hash, salt } = await auth.hashPassword(pwd, iterations);
   await db.createUser(c.env.DB, {
-    username, hash, salt, iterations, role: 'admin', status: 'active', mustChange: 0,
+    username, hash, salt, iterations, role: ROLE_SUPER, status: 'active', mustChange: 0,
   });
   await db.writeAudit(c.env.DB, username, '初始化', `创建管理员账号 ${username}`, c.ip);
   await flash(c, 'success', '管理员账号已创建，请用该账号登录');
@@ -515,7 +528,7 @@ async function handleRegisterPost(c: Ctx, form: FormData): Promise<Response> {
   const { hash, salt } = await auth.hashPassword(pwd, iterations);
   await db.createUser(c.env.DB, {
     username: f.username, hash, salt, iterations,
-    role: 'user', status: 'pending', mustChange: 0,
+    role: normRole(String(form.get('role') || '')) as string, status: 'pending', mustChange: 0,
     realName: f.real_name, phone: f.phone, remark: f.remark, regIp: c.ip,
   });
   await db.writeAudit(c.env.DB, '', '注册申请',
@@ -567,7 +580,7 @@ async function handleAddPost(c: Ctx, form: FormData): Promise<Response> {
       ...layoutOpts(c, '新增招聘信息', 'add'), mode: 'add', rec: data,
     }), 400);
   }
-  const newId = await db.insertRecruit(c.env.DB, data);
+  const newId = await db.insertRecruit(c.env.DB, data, c.user?.id ?? 0);
   await audit(c, '新增', `编号 ${newId} ${data.company_name} - ${data.position}`);
   await flash(c, 'success', `新增成功（编号 ${newId}），已生成招聘信息记录`);
   if (String(form.get('then') || '') === 'docx') return redirect(c, `/docx/${newId}`);
@@ -577,6 +590,10 @@ async function handleAddPost(c: Ctx, form: FormData): Promise<Response> {
 async function handleEditGet(c: Ctx, id: number): Promise<Response> {
   const rec = await db.getRecruit(c.env.DB, id);
   if (!rec) return notFound(c);
+  if (!canEditRec(c.user, rec)) {
+    await flash(c, 'error', '乡镇职达站 / 企业只能修改自己发布的招聘信息，这条不是你发布的');
+    return redirect(c, '/');
+  }
   return htmlRes(c, pages.formPage({
     ...layoutOpts(c, '编辑招聘信息', 'add'), mode: 'edit', rec, rid: id,
   }));
@@ -585,6 +602,10 @@ async function handleEditGet(c: Ctx, id: number): Promise<Response> {
 async function handleEditPost(c: Ctx, form: FormData, id: number): Promise<Response> {
   const rec = await db.getRecruit(c.env.DB, id);
   if (!rec) return notFound(c);
+  if (!canEditRec(c.user, rec)) {
+    await flash(c, 'error', '乡镇职达站 / 企业只能修改自己发布的招聘信息，这条不是你发布的');
+    return redirect(c, '/');
+  }
   const data = formDataToRecord(form);
   const dateErr = fixPublishDate(data);
   if (dateErr) {
@@ -608,6 +629,10 @@ async function handleEditPost(c: Ctx, form: FormData, id: number): Promise<Respo
 async function handleDelete(c: Ctx, form: FormData, id: number): Promise<Response> {
   const rec = await db.getRecruit(c.env.DB, id);
   if (!rec) return notFound(c);
+  if (!canEditRec(c.user, rec)) {
+    await flash(c, 'error', '乡镇职达站 / 企业只能删除自己发布的招聘信息');
+    return redirect(c, auth.safeNext(String(form.get('back') || '/'), '/'));
+  }
   await db.deleteRecruit(c.env.DB, id);
   await audit(c, '删除', `编号 ${id} ${rec.company_name} - ${rec.position}`);
   await flash(c, 'success', `已删除编号 ${id} 的招聘信息`);
@@ -620,14 +645,16 @@ async function handleDelete(c: Ctx, form: FormData, id: number): Promise<Respons
 async function handlePreview(c: Ctx, id: number): Promise<Response> {
   const rec = await db.getRecruit(c.env.DB, id);
   if (!rec) return notFound(c);
-  return htmlRes(c, pages.previewPage(prepare(rec, true), c.user));
+  return htmlRes(c, pages.previewPage(
+    prepare(rec, true), c.user, await db.headerText(c.env.DB),
+  ));
 }
 
 async function handleDocx(c: Ctx, id: number): Promise<Response> {
   const rec = await db.getRecruit(c.env.DB, id);
   if (!rec) return notFound(c);
   const info = prepare(rec, true);
-  const bytes = buildDocx(info);
+  const bytes = buildDocx(info, await db.headerText(c.env.DB));
   return fileRes(c, bytes, docFilename(info), DOCX_MIME);
 }
 
@@ -664,7 +691,7 @@ async function handleDocxSelected(c: Ctx, form: FormData): Promise<Response> {
   }
 
   const infos = rows.map((r: any) => prepare(r, true));
-  const bytes = buildDocxMulti(infos);
+  const bytes = buildDocxMulti(infos, await db.headerText(c.env.DB));
   await audit(c, '导出选定 Word',
     `共 ${rows.length} 份（编号 ${rows.map((r: any) => r.id).join(',')}）`);
   return fileRes(c, bytes, multiDocFilename(rows.length), DOCX_MIME);
@@ -883,6 +910,7 @@ async function handlePrint(c: Ctx): Promise<Response> {
     subtitle,
     backUrl: '/',
     qrUrl: '/qr.jpg',
+    header: await db.headerText(c.env.DB),
     autoPrint: c.url.searchParams.get('print') === '1',
   }));
 }
@@ -948,7 +976,7 @@ async function handleDocxRange(c: Ctx): Promise<Response> {
   }
 
   const infos = rows.map((r: any) => prepare(r, true));
-  const bytes = buildDocxMulti(infos);
+  const bytes = buildDocxMulti(infos, await db.headerText(c.env.DB));
   await audit(c, '按日期导出 Word', `共 ${rows.length} 份（${rangeLabel(start, end)}）`);
   return fileRes(c, bytes, rangeDocFilename(rows.length, start, end), DOCX_MIME);
 }
@@ -961,6 +989,7 @@ async function handleZip(c: Ctx): Promise<Response> {  const q = (c.url.searchPa
   }
   const files: Record<string, Uint8Array> = {};
   const used = new Set<string>();
+  const hdr = await db.headerText(c.env.DB);
   for (const rec of rows) {
     const info = prepare(rec, true);
     let name = `${String(rec.id).padStart(3, '0')}_${docFilename(info)}`;
@@ -970,7 +999,7 @@ async function handleZip(c: Ctx): Promise<Response> {  const q = (c.url.searchPa
       name = name.replace(/\.docx$/, `(${n}).docx`);
     }
     used.add(name);
-    files[name] = buildDocx(info);
+    files[name] = buildDocx(info, hdr);
   }
   const zip = zipSync(files, { level: 6 });
   await audit(c, '批量生成 Word', `共 ${rows.length} 份${q ? `，关键词：${q}` : ''}`);
@@ -1013,7 +1042,7 @@ async function handleImportPost(c: Ctx, form: FormData): Promise<Response> {
     }));
   }
 
-  const inserted = await db.insertManyRecruit(c.env.DB, result.valid);
+  const inserted = await db.insertManyRecruit(c.env.DB, result.valid, c.user?.id ?? 0);
   await audit(c, '导入 Excel', `${(file as File).name}：成功 ${inserted} 条`);
   await flash(c, 'success',
     `导入完成：成功 ${inserted} 条，跳过 ${result.skipped + result.errors.length} 行`);
@@ -1101,7 +1130,7 @@ async function handleUserAction(c: Ctx, form: FormData, uid: number): Promise<Re
     return done('不能对自己的账号执行该操作', 'error');
   }
   if (['disable', 'delete', 'demote'].includes(action)
-      && target.role === 'admin' && target.status === 'active'
+      && isManager(target.role) && target.status === 'active'
       && (await db.activeAdminCount(c.env.DB)) <= 1) {
     return done('至少要保留一个正常状态的管理员账号', 'error');
   }
@@ -1132,9 +1161,29 @@ async function handleUserAction(c: Ctx, form: FormData, uid: number): Promise<Re
       await audit(c, '设为管理员', name);
       return done(`已将 ${name} 设为管理员`);
     case 'demote':
-      await db.setUserRole(c.env.DB, uid, 'user');
+      await db.setUserRole(c.env.DB, uid, ROLE_ENTERPRISE);
       await audit(c, '取消管理员', name);
-      return done(`已取消 ${name} 的管理员权限`);
+      return done(`已取消 ${name} 的管理员权限，账号类型改为企业`);
+    case 'setrole': {
+      const role = normRole(String(form.get('role') || ''));
+      if (role === normRole(target.role)) {
+        return done(`${name} 已经是${roleLabel(role)}`, 'info');
+      }
+      // 只有超级管理员能动「超级管理员」这个类型，防止管理员给自己提权
+      if (!c.isSuper && (role === ROLE_SUPER || normRole(target.role) === ROLE_SUPER)) {
+        return done('只有超级管理员才能设置或修改「超级管理员」', 'error');
+      }
+      if (uid === me.id) return done('不能修改自己的账号类型，请让另一位管理员操作', 'error');
+      if (isManager(target.role) && !isManager(role)
+          && target.status === 'active'
+          && (await db.activeAdminCount(c.env.DB)) <= 1) {
+        return done('至少要保留一个正常状态的管理员账号', 'error');
+      }
+      await db.setUserRole(c.env.DB, uid, role);
+      await audit(c, '修改账号类型',
+        `${name}：${roleLabel(target.role)} → ${roleLabel(role)}`);
+      return done(`已将 ${name} 设为${roleLabel(role)}`);
+    }
     case 'resetpwd': {
       const temp = auth.randomPassword();
       const iterations = Number(c.env.PBKDF2_ITERATIONS || 100000);
@@ -1150,6 +1199,29 @@ async function handleUserAction(c: Ctx, form: FormData, uid: number): Promise<Re
     default:
       return done('未知操作', 'error');
   }
+}
+
+// --------------------------------------------------------------------------- //
+// 系统设置（仅超级管理员）：导出简章的页眉文字
+// --------------------------------------------------------------------------- //
+async function handleSettingsGet(c: Ctx): Promise<Response> {
+  const header = await db.headerText(c.env.DB);
+  return htmlRes(c, pages.settingsPage({
+    ...layoutOpts(c, '系统设置 · 招聘信息管理系统', 'settings'),
+    header, defaultHeader: db.DEFAULT_HEADER,
+  }));
+}
+
+async function handleSettingsPost(c: Ctx, form: FormData): Promise<Response> {
+  const text = String(form.get('header_text') || '').trim();
+  if (text.length > 60) {
+    await flash(c, 'error', '页眉文字最多 60 个字');
+    return handleSettingsGet(c);
+  }
+  await db.setSetting(c.env.DB, db.SETTING_HEADER, text);
+  await audit(c, '修改页眉', text || `恢复默认（${db.DEFAULT_HEADER}）`);
+  await flash(c, 'success', '页眉已保存，之后导出的 Word / PDF 都会使用这个文字');
+  return redirect(c, '/settings');
 }
 
 function notFound(c: Ctx): Response {

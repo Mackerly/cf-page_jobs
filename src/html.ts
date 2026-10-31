@@ -3,8 +3,8 @@
  */
 import { CSS } from './css';
 import {
-  DocInfo, FIELD_LABELS, FIELDS, QR_CAPTION, STATUS_LABELS, STATUS_OPTIONS, effStatus, normStatus,
-  todayIso,
+  DocInfo, FIELD_LABELS, FIELDS, QR_CAPTION, ROLES, SELF_ROLES, STATUS_LABELS, STATUS_OPTIONS,
+  canEditRec, effStatus, normStatus, roleLabel, todayIso,
 } from './format';
 
 export function h(s: unknown): string {
@@ -44,7 +44,8 @@ export interface LayoutOpts {
   siteName?: string;
   csrf: string;
   user?: UserLike | null;
-  isAdmin?: boolean;
+  isAdmin?: boolean;      // 管理员或超级管理员
+  isSuper?: boolean;      // 仅超级管理员
   pendingCount?: number;
   allowRegister?: boolean;
   flashes?: [string, string][];
@@ -70,10 +71,13 @@ export function layout(o: LayoutOpts, body: string): string {
     <a href="/docx/zip">批量生成 Word${lock(!u)}</a>
     ${o.isAdmin ? `<a href="/users" class="${o.active === 'users' ? 'on' : ''}">用户管理${
       o.pendingCount ? `<span class="badge">${o.pendingCount}</span>` : ''}</a>
-    <a href="/audit" class="${o.active === 'audit' ? 'on' : ''}">操作日志</a>` : ''}`;
+    <a href="/audit" class="${o.active === 'audit' ? 'on' : ''}">操作日志</a>` : ''}
+    ${o.isSuper ? `<a href="/settings" class="${o.active === 'settings' ? 'on' : ''}"
+      title="设置导出简章的页眉文字">系统设置</a>` : ''}`;
 
   const userbox = u
-    ? `<span class="who"><i class="dot"></i>${h(u.username)}${o.isAdmin ? '<span class="mini-role">管理员</span>' : ''}</span>
+    ? `<span class="who"><i class="dot"></i>${h(u.username)}<span class="mini-role">${
+      h(roleLabel(u.role))}</span></span>
        <a class="link-mini" href="/password">修改密码</a>
        <form method="post" action="/logout" class="inline">
          <input type="hidden" name="_csrf" value="${h(o.csrf)}">
@@ -145,7 +149,8 @@ export function indexPage(o: LayoutOpts & {
     <tr class="${st === 'expired' ? 'row-expired' : st === 'full' ? 'row-full' : ''}">
       <td class="mono">${user ? `<input type="checkbox" class="pick-box" name="ids" value="${r.id}"
         data-id="${r.id}" form="selForm" aria-label="选择序号 ${seq}"> ` : ''}${seq}</td>
-      <td class="strong">${h(r.company_name)}</td>
+      <td class="strong">${h(r.company_name)}${r.owner_label
+        ? `<div class="owner-tip" title="发布人">${h(r.owner_label)}</div>` : ''}</td>
       <td>${h(r.position)}</td>
       <td class="center">${h(r.headcount || '—')}</td>
       <td class="center salary">${h(r.salary || '面议')}</td>
@@ -159,13 +164,17 @@ export function indexPage(o: LayoutOpts & {
         <a class="btn btn-xs" href="/preview/${r.id}">预览</a>
         <a class="btn btn-xs btn-primary" href="/docx/${r.id}">Word</a>
         <a class="btn btn-xs" href="/print/${r.id}?print=1" title="A4 打印版，可直接打印或存为 PDF">PDF</a>
-        ${user ? `<a class="btn btn-xs" href="/edit/${r.id}">编辑</a>
+        ${user
+        ? (canEditRec(user, r)
+          ? `<a class="btn btn-xs" href="/edit/${r.id}">编辑</a>
         <form method="post" action="/delete/${r.id}" class="inline"
               onsubmit="return confirm('确定删除第 ${seq} 条「${h(r.company_name)} - ${h(r.position)}」吗？此操作不可恢复。');">
           <input type="hidden" name="_csrf" value="${h(o.csrf)}">
           <input type="hidden" name="back" value="${h(listUrl(page))}">
           <button class="btn btn-xs btn-danger" type="submit">删除</button>
         </form>`
+          : `<span class="btn btn-xs btn-ghost readonly"
+              title="乡镇职达站 / 企业只能修改自己发布的招聘信息">🔒 只读</span>`)
         : `<a class="btn btn-xs btn-ghost" href="/login?next=${encodeURIComponent(`/edit/${r.id}`)}" title="编辑与删除需登录">🔒 编辑</a>`}
       </td>
     </tr>`;
@@ -885,14 +894,18 @@ export function printPage(o: {
   subtitle?: string;
   backUrl?: string;
   qrUrl?: string;
+  /** 页眉文字（如「炎陵县就业职达站」），每条一页都会出现 */
+  header?: string;
   /** 打开后自动弹出打印对话框 */
   autoPrint?: boolean;
 }): string {
   const back = o.backUrl || '/';
   const qr = o.qrUrl || '/qr.jpg';
+  const header = String(o.header || '').trim();
 
   const sheets = o.items.map((it) => `
 <section class="sheet">
+  ${header ? `<div class="page-hdr">${h(header)}</div>` : ''}
   <div class="no">编号：${h(it.no)}</div>
   <h1>招 聘 简 章</h1>
   <div class="company">${h(it.company)}</div>
@@ -951,6 +964,12 @@ export function printPage(o: {
     width: 206mm; margin: 8mm auto; padding: 10mm 11mm; background: #fff;
     box-shadow: 0 8px 26px rgba(16, 24, 40, .16);
     font-size: 11pt; line-height: normal;
+  }
+  /* 页眉：居中的单位名 + 细线，每条一页的顶部都会出现（尺寸用 em，缩字号时一起收） */
+  .page-hdr {
+    margin: 0 0 2.6mm; padding-bottom: 1mm;
+    text-align: center; font-size: .82em; color: #444;
+    border-bottom: .6pt solid #999;
   }
   .no { text-align: right; font-size: .82em; color: #888; }
   /* 以下间距统一用 em：长内容缩字号时，行距、表格内边距、二维码、页脚间距会等比一起收，
@@ -1497,6 +1516,14 @@ export function registerPage(o: LayoutOpts & {
                  autofocus placeholder="字母 / 数字，3-30 位">
         </label>
         <label class="field">
+          <span class="label">账号类型 <i class="req-mark">*</i></span>
+          <select name="role" required>
+            ${SELF_ROLES.map((r) => `<option value="${r}"${
+    (f.role || 'enterprise') === r ? ' selected' : ''}>${h(roleLabel(r))}</option>`).join('')}
+          </select>
+          <small class="muted-sm">两类都可以查看全部招聘信息，但只能修改自己发布的</small>
+        </label>
+        <label class="field">
           <span class="label">真实姓名 <i class="req-mark">*</i></span>
           <input type="text" name="real_name" value="${h(f.real_name)}" required maxlength="40" placeholder="便于管理员核对身份">
         </label>
@@ -1573,8 +1600,64 @@ export function passwordPage(o: LayoutOpts & { first: boolean }): string {
 }
 
 // --------------------------------------------------------------------------- //
+// 系统设置（仅超级管理员）：导出简章的页眉文字
+// --------------------------------------------------------------------------- //
+export function settingsPage(
+  o: LayoutOpts & { header: string; defaultHeader: string },
+): string {
+  const body = `
+  <div class="page-head">
+    <div>
+      <h1>系统设置</h1>
+      <p class="sub">这里改的是「导出简章」的页眉文字，改完立即生效，不用重启</p>
+    </div>
+    <div class="head-actions"><a class="btn" href="/">返回列表</a></div>
+  </div>
+
+  <div class="card" style="max-width:720px">
+    <form method="post" action="/settings">
+      <input type="hidden" name="_csrf" value="${h(o.csrf)}">
+      <label class="field">
+        <span class="label">页眉文字</span>
+        <input type="text" name="header_text" value="${h(o.header)}"
+               maxlength="60" autocomplete="off" placeholder="${h(o.defaultHeader)}">
+        <small class="muted-sm">出现在导出 Word / PDF 简章的每一页顶部（居中，下方一条细线）。
+          默认值：<b>${h(o.defaultHeader)}</b>；留空保存即恢复默认。最多 60 个字。</small>
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">保存</button>
+        <a class="btn" href="/">取消</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="max-width:720px;margin-top:16px">
+    <h3 class="card-title">效果预览</h3>
+    <div style="border:1px solid #e3e7ef;border-radius:8px;padding:18px 22px 26px;background:#fff">
+      <div style="text-align:center;font-size:12px;color:#444;padding-bottom:6px;border-bottom:1px solid #b9bec7">
+        ${h(o.header)}</div>
+    </div>
+    <p class="muted-sm" style="margin-top:10px">
+      Word / PDF 简章的正文从页眉下方开始，页眉不会挤占正文高度，「一条一页」的排版不受影响。
+    </p>
+  </div>`;
+  return layout(o, body);
+}
+
+// --------------------------------------------------------------------------- //
 // 用户管理
 // --------------------------------------------------------------------------- //
+/** 账号类型下拉：改完自动提交（只有超级管理员能选「超级管理员」） */
+function roleSelect(u: any, isSuper: boolean | undefined, csrf: string): string {
+  const opts = ROLES.map((r) => `<option value="${r}"${u.role === r ? ' selected' : ''}${
+    r === 'super' && !isSuper ? ' disabled' : ''}>${h(roleLabel(r))}</option>`).join('');
+  return `<form method="post" action="/users/${u.id}/action" class="inline role-form" title="修改账号类型">
+      <input type="hidden" name="_csrf" value="${csrf}">
+      <input type="hidden" name="action" value="setrole">
+      <select name="role" class="select-mini" onchange="this.form.submit()">${opts}</select>
+    </form>`;
+}
+
 export function usersPage(o: LayoutOpts & { rows: any[] }): string {
   const { rows } = o;
   const pend = rows.filter((u) => u.status === 'pending');
@@ -1596,6 +1679,7 @@ export function usersPage(o: LayoutOpts & { rows: any[] }): string {
         <div class="pending-main">
           <div class="pending-name"><b>${h(u.username)}</b><span class="muted-sm">申请于 ${h(u.created_at)}</span></div>
           <div class="pending-meta">
+            <span>类型：<b>${h(roleLabel(u.role))}</b></span>
             <span>姓名：${h(u.real_name || '未填')}</span>
             <span>电话：${h(u.phone || '未填')}</span>
             <span>单位：${h(u.remark || '未填')}</span>
@@ -1622,10 +1706,10 @@ export function usersPage(o: LayoutOpts & { rows: any[] }): string {
       } else {
         ops += actionForm(u.id, 'enable', '启用', 'btn-primary');
       }
-      if (u.role === 'admin') {
-        if (!isMe) ops += actionForm(u.id, 'demote', '取消管理员', '', `取消 ${h(u.username)} 的管理员权限？`);
+      if (isMe) {
+        ops += '<span class="muted-sm" title="不能修改自己的账号类型">当前账号</span>';
       } else {
-        ops += actionForm(u.id, 'promote', '设为管理员', '', `将 ${h(u.username)} 设为管理员？管理员可审批账号、查看日志。`);
+        ops += roleSelect(u, o.isSuper, csrf);
       }
       ops += actionForm(u.id, 'resetpwd', '重置密码', '', `重置 ${h(u.username)} 的密码？系统会生成一个临时密码。`);
       if (!isMe) ops += actionForm(u.id, 'delete', '删除', 'btn-danger', `删除账号 ${h(u.username)}？此操作不可恢复。`);
@@ -1634,8 +1718,8 @@ export function usersPage(o: LayoutOpts & { rows: any[] }): string {
     const statusTag = u.status === 'pending' ? '<span class="tag tag-pending">待审批</span>'
       : u.status === 'active' ? '<span class="tag tag-ok">正常</span>'
         : '<span class="tag tag-off">已停用</span>';
-    const roleTag = u.role === 'admin'
-      ? '<span class="tag tag-admin">管理员</span>' : '<span class="tag">操作员</span>';
+    const roleTag = `<span class="tag ${u.role === 'super' ? 'tag-super'
+      : (u.role === 'admin' ? 'tag-admin' : 'tag-role')}">${h(roleLabel(u.role))}</span>`;
 
     return `<tr class="${isMe ? 'row-me' : ''}">
       <td class="mono">${u.id}</td>
@@ -1655,7 +1739,10 @@ export function usersPage(o: LayoutOpts & { rows: any[] }): string {
     <div>
       <h1>用户管理</h1>
       <p class="sub">共 ${rows.length} 个账号${pend.length ? `，其中 <b>${pend.length}</b> 个待审批` : ''}
-        · 审批通过后该账号即可使用新增招聘、导入导出 Excel、批量生成 Word</p>
+        · 审批通过后该账号即可使用新增招聘、导入导出 Excel、批量生成 Word
+        <br><span class="muted-sm">账号类型：<b>超级管理员</b> 全部权限（含系统设置）·
+        <b>管理员</b> 可改任意招聘信息与账号 ·
+        <b>乡镇职达站 / 企业</b> 可查看全部招聘信息，但只能修改自己发布的</span></p>
     </div>
     <div class="head-actions">
       <a class="btn" href="/audit">操作日志</a>
@@ -1679,7 +1766,9 @@ export function usersPage(o: LayoutOpts & { rows: any[] }): string {
       <li>新注册账号状态为<b>待审批</b>，未审批前无法登录（登录会提示「正在等待管理员审批」）。</li>
       <li><b>通过</b>后账号立即可用；<b>拒绝</b>会删除该账号记录，申请人可重新提交。</li>
       <li><b>停用</b>的账号无法登录，已登录的会话会在下一次操作时立即失效。</li>
-      <li><b>管理员</b>额外拥有：审批账号、停用 / 删除账号、查看操作日志。</li>
+      <li><b>管理员</b>额外拥有：审批账号、停用 / 删除账号、查看操作日志、修改任意招聘信息。</li>
+      <li><b>乡镇职达站 / 企业</b>可以查看全部招聘信息，但只能修改、删除<b>自己发布</b>的那些。</li>
+      <li><b>超级管理员</b>额外拥有「系统设置」（导出简章的页眉文字）；只有超级管理员能设置或修改这个类型。</li>
       <li>为避免把系统锁死，<b>不能停用 / 删除 / 降级自己</b>，且系统至少保留一个正常状态的管理员。</li>
       <li><b>重置密码</b>会生成随机临时密码并显示一次，该账号下次登录会被强制修改。</li>
     </ul>
@@ -1722,7 +1811,11 @@ export function auditPage(o: LayoutOpts & { rows: any[] }): string {
 // --------------------------------------------------------------------------- //
 // 打印预览（独立页面）
 // --------------------------------------------------------------------------- //
-export function previewPage(info: DocInfo, user: UserLike | null): string {
+export function previewPage(
+  info: DocInfo, user: UserLike | null, header = '',
+): string {
+  const headerHtml = String(header || '').trim()
+    ? `<div class="page-hdr">${h(String(header).trim())}</div>` : '';
   const editLink = user ? `<a href="/edit/${info.id}">编辑</a>` : '';
   // 单条打印页 /print/:id 和 /docx/:id 一样是公开的，所以访客也能看到这个入口
   const pdfLink = `<a href="/print/${info.id}?print=1">下载 PDF</a>`;
@@ -1759,6 +1852,10 @@ export function previewPage(info: DocInfo, user: UserLike | null): string {
     font-size: ${info.bodyPt}pt; line-height: 1.28;
   }
   .doc-no { text-align: right; font-size: 9pt; color: #888; margin: 0 0 3pt; }
+  .page-hdr {
+    margin: 0 0 8pt; padding-bottom: 3pt; text-align: center;
+    font-size: 9pt; color: #444; border-bottom: 0.6pt solid #999;
+  }
   h1 { margin: 0 0 3pt; text-align: center; font-family: "黑体", SimHei, sans-serif;
        font-size: 22pt; font-weight: 700; letter-spacing: 2pt; }
   .company { margin: 0 0 2pt; text-align: center; font-family: "黑体", SimHei, sans-serif;
@@ -1798,6 +1895,7 @@ export function previewPage(info: DocInfo, user: UserLike | null): string {
   </div>
 </div>
 <div class="paper-wrap"><div class="sheet">
+  ${headerHtml}
   <p class="doc-no">编号：ZP-${info.year}-${String(info.id).padStart(4, '0')}</p>
   <h1>招 聘 简 章</h1>
   <p class="company">${h(info.company)}</p>

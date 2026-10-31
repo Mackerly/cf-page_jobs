@@ -468,12 +468,35 @@ form.inline button { font-family: inherit; }
   background: var(--primary-soft); border-radius: 4px; padding: 0 4px;
 }
 .tag-admin { background: #eef0fd; color: #4a4fb0; }
+.tag-super { background: #fdeeee; color: #b03535; }
+.tag-role { background: #eef7f0; color: #2f7a4a; }
 .tag-pending { background: var(--warn-soft); color: var(--warn); }
 .tag-ok { background: var(--success-soft); color: var(--success); }
 .tag-off { background: #f1f2f5; color: #8b93a1; }
 .tag-me { background: #f1f2f5; color: #6b7280; margin-left: 4px; }
 .row-me { background: #fbfcff; }
 .muted-sm { color: var(--muted); font-size: 12px; }
+
+/* 列表里单位名下面的「发布人」，以及无编辑权限时的只读标记 */
+.owner-tip { margin-top: 1px; font-size: 11px; font-weight: 400; color: var(--muted); }
+.ops .readonly { cursor: default; opacity: .75; }
+.role-form { display: inline-block; margin-right: 2px; vertical-align: middle; }
+.select-mini {
+  height: 24px; padding: 0 4px; border: 1px solid var(--line); border-radius: 6px;
+  background: #fff; color: var(--text); font-size: 12px; font-family: inherit; cursor: pointer;
+}
+.select-mini:hover { border-color: var(--primary); }
+
+/* 系统设置页：页眉效果预览 */
+.hdr-preview {
+  margin-top: 14px; padding: 16px 18px; border: 1px dashed var(--line);
+  border-radius: 10px; background: #fff;
+}
+.hdr-preview-label { margin: 0 0 10px; font-size: 12px; color: var(--muted); }
+.hdr-preview-text {
+  padding-bottom: 4px; border-bottom: 1px solid #999;
+  text-align: center; font-size: 13px; color: #444;
+}
 
 .pending-list { display: flex; flex-direction: column; gap: 10px; }
 .pending-item {

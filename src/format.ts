@@ -358,3 +358,63 @@ export function rangeXlsxFilename(start: string, end: string, today: string): st
   return start || end ? `招聘信息_${rangeTag(start, end)}.xlsx` : `招聘信息_${today}.xlsx`;
 }
 
+
+// --------------------------------------------------------------------------- //
+// 账号类型（角色）
+//   super       超级管理员：全部权限，含「系统设置」（页眉文字）
+//   admin       管理员    ：账号管理、审计、备份，可改任意招聘信息
+//   town        乡镇职达站：可查看全部招聘信息，只能改自己发布的
+//   enterprise  企业      ：可查看全部招聘信息，只能改自己发布的
+// --------------------------------------------------------------------------- //
+export const ROLE_SUPER = 'super';
+export const ROLE_ADMIN = 'admin';
+export const ROLE_TOWN = 'town';
+export const ROLE_ENTERPRISE = 'enterprise';
+/** 兼容旧代码里「普通账号」的说法 */
+export const ROLE_USER = ROLE_ENTERPRISE;
+
+export const ROLES = [ROLE_SUPER, ROLE_ADMIN, ROLE_TOWN, ROLE_ENTERPRISE];
+/** 可自助注册的类型（超级管理员 / 管理员只能由后台指定） */
+export const SELF_ROLES = [ROLE_TOWN, ROLE_ENTERPRISE];
+/** 可以修改任意招聘信息的类型 */
+export const MANAGER_ROLES = [ROLE_SUPER, ROLE_ADMIN];
+
+export const ROLE_LABELS: Record<string, string> = {
+  [ROLE_SUPER]: '超级管理员',
+  [ROLE_ADMIN]: '管理员',
+  [ROLE_TOWN]: '乡镇职达站',
+  [ROLE_ENTERPRISE]: '企业',
+};
+
+/** 认不出的角色一律当「企业」，避免出现无权限的孤儿账号 */
+export function normRole(role?: string | null): string {
+  const s = String(role ?? '').trim().toLowerCase();
+  return ROLES.includes(s) ? s : ROLE_ENTERPRISE;
+}
+
+export function roleLabel(role?: string | null): string {
+  return ROLE_LABELS[normRole(role)] || ROLE_LABELS[ROLE_ENTERPRISE];
+}
+
+/** 管理员或超级管理员 */
+export function isManager(role?: string | null): boolean {
+  return MANAGER_ROLES.includes(normRole(role));
+}
+
+export function isSuperRole(role?: string | null): boolean {
+  return normRole(role) === ROLE_SUPER;
+}
+
+/**
+ * 能否修改 / 删除这条招聘信息。
+ * 管理员、超级管理员可以改任意一条；乡镇职达站、企业只能改自己发布的
+ * （owner_id 为 0 的历史数据没有归属，只有管理员能动）。
+ */
+export function canEditRec(
+  user: { id: number; role?: string } | null | undefined, rec: any,
+): boolean {
+  if (!user) return false;
+  if (isManager(user.role)) return true;
+  const owner = Number(rec?.owner_id ?? 0);
+  return owner > 0 && owner === Number(user.id);
+}

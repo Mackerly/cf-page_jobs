@@ -1,6 +1,6 @@
 DELETE FROM users;
 INSERT INTO users (username, pwd_hash, salt, iterations, must_change, created_at, status, role, real_name, phone, remark, approved_at, approved_by)
-VALUES ('admin', '7a7af92aadfcdc0f198ce8b2669d563c03751ba1b5a3ddca5368b29bfa78b9f0', 'f365fedfdc7e3e43bb844d32d93a1910', 100000, 0, '2026-10-21 17:52:31', 'active', 'admin', '系统管理员', '', '', '2026-10-21 17:52:31', 'system');
+VALUES ('admin', '7a7af92aadfcdc0f198ce8b2669d563c03751ba1b5a3ddca5368b29bfa78b9f0', 'f365fedfdc7e3e43bb844d32d93a1910', 100000, 0, '2026-10-21 17:52:31', 'active', 'super', '系统管理员', '', '', '2026-10-21 17:52:31', 'system');
 
 DELETE FROM recruit;
 INSERT INTO recruit (company_name, position, headcount, requirements, salary, address, phone, publish_date, status, created_at, updated_at) VALUES

@@ -148,29 +148,49 @@ function row(cells: string[], minHeight = MIN_ROW_H): string {
     + cells.join('') + '</w:tr>';
 }
 
-const CONTENT_TYPES = `${XML_HEAD}
+function contentTypes(hasHeader: boolean): string {
+  return `${XML_HEAD}
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
 <Default Extension="jpeg" ContentType="image/jpeg"/>
 <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
 <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+${hasHeader ? '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>' : ''}
 </Types>`;
+}
 
 const ROOT_RELS = `${XML_HEAD}
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`;
 
-function docRels(hasQr: boolean): string {
+function docRels(hasQr: boolean, hasHeader: boolean): string {
   const items = [
     '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>',
   ];
   if (hasQr) {
     items.push('<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/qr.jpeg"/>');
   }
+  if (hasHeader) {
+    items.push('<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>');
+  }
   return `${XML_HEAD}
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${items.join('')}</Relationships>`;
+}
+
+/**
+ * 页眉部件：居中 9pt 深灰文字 + 一条细底边线。
+ * <w:pBdr> 必须排在 <w:jc> 之前，否则 Word 判定文档损坏。
+ */
+function headerXml(text: string): string {
+  return `${XML_HEAD}
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="808080"/></w:pBdr>
+<w:jc w:val="center"/></w:pPr>
+${run(text, { size: 9, color: '595959' })}
+</w:p></w:hdr>`;
 }
 
 function stylesXml(bodyPt: number): string {
@@ -290,7 +310,13 @@ ${rows.join('')}
 }
 
 /** 把若干段落块打包成 .docx 字节 */
-function packDocx(blocks: string[], bodyPt: number, hasQr: boolean): Uint8Array {
+function packDocx(
+  blocks: string[], bodyPt: number, hasQr: boolean, header = '',
+): Uint8Array {
+  const hdrText = String(header ?? '').trim();
+  const hasHeader = hdrText !== '';
+  // <w:headerReference> 必须是 <w:sectPr> 的第一个子元素
+  const hdrRef = hasHeader ? '<w:headerReference w:type="default" r:id="rId3"/>' : '';
   const documentXml = `${XML_HEAD}
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -300,6 +326,7 @@ function packDocx(blocks: string[], bodyPt: number, hasQr: boolean): Uint8Array 
 <w:body>
 ${blocks.join('\n')}
 <w:sectPr>
+${hdrRef}
 <w:pgSz w:w="${PAGE_W}" w:h="${PAGE_H}"/>
 <w:pgMar w:top="${MARGIN_T}" w:right="${MARGIN_LR}" w:bottom="${MARGIN_B}" w:left="${MARGIN_LR}" w:header="567" w:footer="567" w:gutter="0"/>
 <w:cols w:space="425"/>
@@ -308,12 +335,15 @@ ${blocks.join('\n')}
 </w:body></w:document>`;
 
   const files: Record<string, Uint8Array> = {
-    '[Content_Types].xml': strToU8(CONTENT_TYPES),
+    '[Content_Types].xml': strToU8(contentTypes(hasHeader)),
     '_rels/.rels': strToU8(ROOT_RELS),
     'word/document.xml': strToU8(documentXml),
     'word/styles.xml': strToU8(stylesXml(bodyPt)),
-    'word/_rels/document.xml.rels': strToU8(docRels(hasQr)),
+    'word/_rels/document.xml.rels': strToU8(docRels(hasQr, hasHeader)),
   };
+  if (hasHeader) {
+    files['word/header1.xml'] = strToU8(headerXml(hdrText));
+  }
   if (hasQr) {
     files['word/media/qr.jpeg'] = qrBytes();
   }
@@ -321,18 +351,18 @@ ${blocks.join('\n')}
 }
 
 /** 单条招聘信息 → 单页 .docx */
-export function buildDocx(info: DocInfo): Uint8Array {
-  return packDocx(recordBlocks(info, 1, false), info.bodyPt, info.hasQr);
+export function buildDocx(info: DocInfo, header = ''): Uint8Array {
+  return packDocx(recordBlocks(info, 1, false), info.bodyPt, info.hasQr, header);
 }
 
 /**
  * 多条招聘信息 → 同一个 .docx，每条占一页（需登录后使用）。
  * 每条的第一个段落带 <w:pageBreakBefore/>，不额外插空段落，避免多占高度。
  */
-export function buildDocxMulti(infos: DocInfo[]): Uint8Array {
+export function buildDocxMulti(infos: DocInfo[], header = ''): Uint8Array {
   if (!infos.length) throw new Error('没有可导出的招聘信息');
   const blocks = infos.flatMap((info, i) => recordBlocks(info, i + 1, i > 0));
-  return packDocx(blocks, infos[0].bodyPt, infos.some((i) => i.hasQr));
+  return packDocx(blocks, infos[0].bodyPt, infos.some((i) => i.hasQr), header);
 }
 
 let _qrCache: Uint8Array | null = null;

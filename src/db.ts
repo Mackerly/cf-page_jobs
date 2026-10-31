@@ -66,6 +66,15 @@ function whereClause(
 }
 
 
+/**
+ * 列表 / 详情里顺带带出发布人（用子查询，避免 JOIN 后 id、status 等列名歧义）。
+ * 乡镇职达站 / 企业只能改自己发布的，靠 owner_id 判断。
+ */
+const OWNER_COLS = ', (SELECT username FROM users WHERE id = recruit.owner_id) AS owner_name'
+  + ", (SELECT COALESCE(NULLIF(real_name,''), username) FROM users WHERE id = recruit.owner_id)"
+  + ' AS owner_label';
+
+
 // --------------------------------------------------------------------------- //
 // 招聘信息
 // --------------------------------------------------------------------------- //
@@ -99,7 +108,7 @@ export async function listRecruit(
   const offset = (page - 1) * perPage;
   const res = await db
     .prepare(
-      `SELECT *, ${statusExpr(today)} AS eff_status FROM recruit${sql}`
+      `SELECT *, ${statusExpr(today)} AS eff_status${OWNER_COLS} FROM recruit${sql}`
       + ' ORDER BY substr(publish_date, 1, 10) DESC, id DESC LIMIT ? OFFSET ?',
     )
     .bind(...args, perPage, offset).all();
@@ -112,14 +121,14 @@ export async function listAllRecruit(
 ) {
   const { sql, args } = whereClause(keyword, start, end, showFull, showExpired, today);
   const res = await db
-    .prepare(`SELECT *, ${statusExpr(today)} AS eff_status FROM recruit${sql} ORDER BY id ASC`)
+    .prepare(`SELECT *, ${statusExpr(today)} AS eff_status${OWNER_COLS} FROM recruit${sql} ORDER BY id ASC`)
     .bind(...args).all();
   return res.results ?? [];
 }
 
 
 export async function getRecruit(db: any, id: number) {
-  return db.prepare('SELECT * FROM recruit WHERE id = ?').bind(id).first();
+  return db.prepare(`SELECT *${OWNER_COLS} FROM recruit WHERE id = ?`).bind(id).first();
 }
 
 /**
@@ -134,21 +143,29 @@ export async function getRecruitsByIds(db: any, ids: number[]) {
   return ids.map((id) => byId.get(id)).filter(Boolean) as any[];
 }
 
-export async function insertRecruit(db: any, data: Record<string, string>): Promise<number> {
+/** 新增一条；ownerId 记发布人（乡镇职达站 / 企业只能改自己发布的） */
+export async function insertRecruit(
+  db: any, data: Record<string, string>, ownerId = 0,
+): Promise<number> {
   const ts = nowLocal();
-  const cols = [...FIELD_NAMES, 'created_at', 'updated_at'];
+  const cols = [...FIELD_NAMES, 'owner_id', 'created_at', 'updated_at'];
   const res = await db.prepare(
     `INSERT INTO recruit (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(',')})`,
-  ).bind(...FIELD_NAMES.map((k) => data[k] || (k === 'publish_date' ? todayIso() : '')), ts, ts).run();
+  ).bind(...FIELD_NAMES.map((k) => data[k] || (k === 'publish_date' ? todayIso() : '')),
+    Number(ownerId) || 0, ts, ts).run();
   return Number(res.meta?.last_row_id ?? 0);
 }
 
-export async function insertManyRecruit(db: any, rows: Record<string, string>[]): Promise<number> {
+/** 批量新增；整批都记在同一个发布人名下 */
+export async function insertManyRecruit(
+  db: any, rows: Record<string, string>[], ownerId = 0,
+): Promise<number> {
   const ts = nowLocal();
-  const cols = [...FIELD_NAMES, 'created_at', 'updated_at'];
+  const cols = [...FIELD_NAMES, 'owner_id', 'created_at', 'updated_at'];
   const stmts = rows.map((r) => db.prepare(
     `INSERT INTO recruit (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(',')})`,
-  ).bind(...FIELD_NAMES.map((k) => r[k] || (k === 'publish_date' ? todayIso() : '')), ts, ts));
+  ).bind(...FIELD_NAMES.map((k) => r[k] || (k === 'publish_date' ? todayIso() : '')),
+    Number(ownerId) || 0, ts, ts));
   for (let i = 0; i < stmts.length; i += 50) {
     await db.batch(stmts.slice(i, i + 50));
   }
@@ -421,4 +438,29 @@ export async function dumpSql(db: any): Promise<DumpResult> {
 
   const sql = out.join('\n');
   return { sql, bytes: new TextEncoder().encode(sql).byteLength, truncated };
+}
+
+// --------------------------------------------------------------------------- //
+// 系统设置（键值对）：目前只有「页眉文字」，以后加别的直接复用
+// --------------------------------------------------------------------------- //
+/** 导出 Word / PDF 时页眉的默认文字 */
+export const DEFAULT_HEADER = '炎陵县就业职达站';
+export const SETTING_HEADER = 'header_text';
+
+export async function getSetting(db: any, key: string, def = ''): Promise<string> {
+  const row = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first();
+  return row?.value == null ? def : String(row.value);
+}
+
+export async function setSetting(db: any, key: string, value: string): Promise<void> {
+  await db.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?)'
+    + ' ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  ).bind(key, value ?? '').run();
+}
+
+/** 导出简章用的页眉文字；没设置过就用默认值 */
+export async function headerText(db: any): Promise<string> {
+  const v = String(await getSetting(db, SETTING_HEADER, '') || '').trim();
+  return v || DEFAULT_HEADER;
 }

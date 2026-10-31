@@ -349,8 +349,8 @@ QS = urllib.parse.quote("排序")
 _, srt, _ = reg.get(f"/?q={QS}")
 check("按发布日期倒序（新在前）", srt.index("排序新公司") < srt.index("排序旧公司"))
 
-# 编辑页回填状态
-_, editpage, _ = reg.get(f"/edit/{RID}")
+# 编辑页回填状态（用自己的记录：种子数据 owner_id=0，企业账号只能改自己发布的）
+_, editpage, _ = reg.get(f"/edit/{rid}")
 check("编辑页有状态下拉", 'name="status"' in editpage)
 check("编辑页默认选中在招", '<option value="active" selected' in editpage)
 
@@ -901,11 +901,150 @@ for _x in set(re.findall(r'data-id="(\d+)"', ilist)):
 _, iclean, _ = adm.get("/?q=" + urllib.parse.quote("导入") + "&show_full=1&show_expired=1")
 check("导入测试数据已清理", "导入空状态公司" not in iclean)
 
+# ---------- 8.7 账号类型与导出页眉 ----------
+print("[8.7] 账号类型 / 导出页眉")
+
+_, regpage, _ = S().get("/register")
+check("注册页有账号类型选择", 'name="role"' in regpage)
+check("注册页可选「乡镇职达站」", "乡镇职达站" in regpage)
+check("注册页可选「企业」", "企业" in regpage)
+check("注册页不能自封管理员", "超级管理员" not in regpage)
+
+# 注册一个「乡镇职达站」账号
+tname = "town" + str(int(time.time()) % 100000)
+town = S()
+st, _, _ = town.post("/register", {
+    "_csrf": csrf(town, "/register"), "username": tname, "password": "Test@1234",
+    "confirm_password": "Test@1234", "real_name": "乡镇甲", "phone": "13900008888",
+    "role": "town",
+})
+check("注册时选了「乡镇职达站」", st == 302, st)
+_, uhtml, _ = adm.get("/users")
+tid = None
+for mm in re.finditer(r'<td class="mono">(\d+)</td>\s*<td class="strong">' + re.escape(tname), uhtml):
+    tid = int(mm.group(1))
+check("定位到乡镇账号 id", tid is not None, tid)
+check("待审批项显示账号类型", "乡镇职达站" in uhtml)
+
+adm.post(f"/users/{tid}/action", {"_csrf": csrf(adm, "/users"), "action": "approve"})
+st, _, _ = town.post("/login", {"_csrf": csrf(town, "/login"),
+                                "username": tname, "password": "Test@1234"})
+check("乡镇账号可登录", st == 302, st)
+
+_, uhtml2, _ = adm.get("/users")
+_trow = re.search(r'<tr[^>]*>.*?' + re.escape(tname) + r'.*?</tr>', uhtml2, re.S)
+_trow_html = _trow.group(0) if _trow else ""
+check("用户列表有账号类型下拉", 'name="role"' in uhtml2 and 'value="setrole"' in uhtml2)
+check("乡镇账号的角色标签正确", "乡镇职达站" in _trow_html)
+check("下拉默认选中「乡镇职达站」", '<option value="town" selected>' in _trow_html)
+
+adm.post(f"/users/{tid}/action",
+         {"_csrf": csrf(adm, "/users"), "action": "setrole", "role": "enterprise"})
+_, uhtml3, _ = adm.get("/users")
+_trow3 = re.search(r'<tr[^>]*>.*?' + re.escape(tname) + r'.*?</tr>', uhtml3, re.S)
+check("改账号类型生效（乡镇 -> 企业）",
+      _trow3 and '<option value="enterprise" selected>' in _trow3.group(0),
+      _trow3.group(0)[:80] if _trow3 else None)
+adm.post(f"/users/{tid}/action",
+         {"_csrf": csrf(adm, "/users"), "action": "setrole", "role": "town"})
+_, uhtml4, _ = adm.get("/users")
+_trow4 = re.search(r'<tr[^>]*>.*?' + re.escape(tname) + r'.*?</tr>', uhtml4, re.S)
+check("能改回「乡镇职达站」",
+      _trow4 and '<option value="town" selected>' in _trow4.group(0),
+      _trow4.group(0)[:80] if _trow4 else None)
+
+# 乡镇账号自己发一条
+st, _, _ = town.post("/add", {
+    "_csrf": csrf(town, "/add"), "company_name": "乡镇测试公司", "position": "协理员",
+    "headcount": "1", "salary": "3000", "address": "乡镇路 1 号",
+    "phone": "13500009999", "requirements": "认真",
+})
+check("乡镇账号可新增", st == 302, st)
+_, tl, _ = town.get("/?q=" + urllib.parse.quote("乡镇测试"))
+_mrow = re.search(r'<tr[^>]*>.*?乡镇测试公司.*?</tr>', tl, re.S)
+mid = int(re.search(r'/preview/(\d+)', _mrow.group(0)).group(1)) if _mrow else None
+check("拿到乡镇自建记录 id", mid is not None, mid)
+check("自己的记录有编辑按钮", mid and f'/edit/{mid}"' in tl)
+check("乡镇账号能编辑自己发布的", town.get(f"/edit/{mid}")[0] == 200)
+
+# 列表：发布人 + 只读标记
+_, adm_list, _ = adm.get("/")
+_, town_list, _ = town.get("/")
+check("列表显示发布人", 'class="owner-tip"' in adm_list)
+check("乡镇账号能看全部招聘信息", "星辰精密机械有限公司" in town_list)
+check("乡镇账号对别人的记录显示只读", "🔒 只读" in town_list)
+check("管理员没有只读标记", "🔒 只读" not in adm_list)
+
+st, _, hd = town.get(f"/edit/{RID}")
+check("乡镇账号打不开别人的编辑页", st == 302 and hd.get("Location") == "/", hd.get("Location"))
+st, _, hd = town.post(f"/edit/{RID}", {"_csrf": csrf(town, "/"), "company_name": "被篡改公司",
+                                       "position": "篡改岗位"})
+check("乡镇账号提交编辑被拦", st == 302, st)
+_, pv_now, _ = S().get(f"/preview/{RID}")
+check("别人的记录没被改", "被篡改公司" not in pv_now)
+st, _, hd = town.post(f"/delete/{RID}", {"_csrf": csrf(town, "/")})
+check("乡镇账号不能删别人的记录", st == 302, st)
+check("别人的记录还在", S().get(f"/preview/{RID}")[0] == 200)
+
+# 页眉：默认值 / 权限 / 改值后立即生效
+st, setpage, _ = adm.get("/settings")
+check("超管可进系统设置", st == 200, st)
+check("设置页含页眉输入框", 'name="header_text"' in setpage)
+check("设置页显示默认页眉", "炎陵县就业职达站" in setpage)
+st, _, _ = S().get("/settings")
+check("匿名不能进系统设置", st == 302, st)
+st, _, _ = town.get("/settings")
+check("乡镇/企业账号不能进系统设置", st == 302, st)
+check("超管导航有系统设置", 'href="/settings"' in adm_list)
+
+_, blob, _ = S().get_raw(f"/docx/{RID}")
+z = zipfile.ZipFile(io.BytesIO(blob))
+check("Word 含页眉部件", "word/header1.xml" in z.namelist())
+_hx = z.read("word/header1.xml").decode("utf-8", "replace")
+check("Word 页眉是默认文字", "炎陵县就业职达站" in _hx)
+check("Word 页眉带细底边线", "<w:pBdr>" in _hx and "<w:bottom" in _hx)
+_doc = z.read("word/document.xml").decode("utf-8", "replace")
+check("Word 正文引用页眉", '<w:headerReference w:type="default"' in _doc)
+check("页眉引用排在 pgSz 之前", 0 <= _doc.find("headerReference") < _doc.find("<w:pgSz"))
+check("Content-Types 声明了 header 部件", "header+xml" in z.read("[Content_Types].xml").decode())
+
+_, pr, _ = S().get(f"/print/{RID}")
+check("打印页含页眉", 'class="page-hdr"' in pr and "炎陵县就业职达站" in pr)
+_, pv, _ = S().get(f"/preview/{RID}")
+check("预览页含页眉", 'class="page-hdr"' in pv and "炎陵县就业职达站" in pv)
+
+st, _, _ = adm.post("/settings", {"_csrf": csrf(adm, "/settings"),
+                                  "header_text": "炎陵县就业服务中心"})
+check("保存页眉 302", st == 302, st)
+_, blob2, _ = S().get_raw(f"/docx/{RID}")
+_hx2 = zipfile.ZipFile(io.BytesIO(blob2)).read("word/header1.xml").decode("utf-8", "replace")
+check("新页眉写进 Word", "炎陵县就业服务中心" in _hx2)
+_, pr2, _ = S().get(f"/print/{RID}")
+check("新页眉出现在打印页", "炎陵县就业服务中心" in pr2)
+
+st, long_body, _ = adm.post("/settings", {"_csrf": csrf(adm, "/settings"),
+                                          "header_text": "长" * 61})
+check("页眉超 60 字被拒", st == 200 and "最多 60" in long_body, st)
+
+adm.post("/settings", {"_csrf": csrf(adm, "/settings"), "header_text": ""})
+_, blob3, _ = S().get_raw(f"/docx/{RID}")
+_hx3 = zipfile.ZipFile(io.BytesIO(blob3)).read("word/header1.xml").decode("utf-8", "replace")
+check("清空后回落默认页眉", "炎陵县就业职达站" in _hx3)
+
+# 清理本节数据
+if mid:
+    town.post(f"/delete/{mid}", {"_csrf": csrf(town, "/"), "back": "/"})
+    _, tclean, _ = town.get("/?q=" + urllib.parse.quote("乡镇测试"))
+    check("乡镇自建记录已清理", "乡镇测试公司" not in tclean)
+adm.post(f"/users/{tid}/action", {"_csrf": csrf(adm, "/users"), "action": "delete"})
+_, uleft, _ = adm.get("/users")
+check("乡镇测试账号已清理", f">{tname}<" not in uleft)
+
 # ---------- 9. 审计 ----------
 print("[9] 审计日志")
 _, au, _ = adm.get("/audit")
 for act in ("登录", "注册申请", "审批通过", "停用账号", "启用账号", "新增", "修改", "删除",
-            "导出 Excel", "直播轮播", "打印简章"):
+            "导出 Excel", "直播轮播", "打印简章", "修改页眉", "修改账号类型"):
     check(f"日志含「{act}」", act in au)
 
 # ---------- 10. 退出 ----------
