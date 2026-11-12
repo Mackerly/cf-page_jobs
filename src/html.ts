@@ -120,6 +120,8 @@ export function indexPage(o: LayoutOpts & {
   start: string; end: string; filtered: boolean;
   showFull: boolean; showExpired: boolean;
   hiddenFull: number; hiddenExpired: number;
+  /** 单次勾选批量操作（导出 / 删除）上限，只用于提示文案 */
+  maxSelected?: number;
 }): string {
   const { rows, q, page, pages, total, user, per, start, end, filtered } = o;
   const { showFull, showExpired, hiddenFull, hiddenExpired } = o;
@@ -216,6 +218,7 @@ export function indexPage(o: LayoutOpts & {
   const selbar = user ? `
   <form id="selForm" method="post" action="/docx/selected" class="selbar">
     <input type="hidden" name="_csrf" value="${h(o.csrf)}">
+    <input type="hidden" name="back" value="${h(listUrl(page))}">
     <span class="selbar-count">已选 <b id="selCount">0</b> 条</span>
     <button class="btn btn-primary btn-xs sel-act" type="submit" disabled>📄 导出选定为 Word（单文件）</button>
     <button class="btn btn-soft btn-xs sel-act" type="submit" disabled
@@ -224,7 +227,9 @@ export function indexPage(o: LayoutOpts & {
             formaction="/print" formmethod="get" name="print" value="1">🖨 打印选定（存为 PDF）</button>
     <button class="btn btn-soft btn-xs sel-act" type="submit" disabled
             formaction="/live">📺 直播轮播</button>
-    <span class="selbar-hint">Word：每条一页合并成一个文件；打印：每条一页的 A4 版式，浏览器里「另存为 PDF」即可；微信：生成公众号排版，一键复制到剪贴板（每篇最多 ${o.maxWechat || 30} 条）；直播：手机全屏循环播放，可设切换间隔（最多 ${o.maxLive || 30} 条）</span>
+    <button class="btn btn-danger btn-xs sel-act" type="submit" disabled
+            formaction="/delete/selected" data-confirm="delete">🗑 删除选定</button>
+    <span class="selbar-hint">Word：每条一页合并成一个文件；打印：每条一页的 A4 版式，浏览器里「另存为 PDF」即可；微信：生成公众号排版，一键复制到剪贴板（每篇最多 ${o.maxWechat || 30} 条）；直播：手机全屏循环播放，可设切换间隔（最多 ${o.maxLive || 30} 条）；删除：不可恢复，只能删自己发布的（最多 ${o.maxSelected || 200} 条）</span>
   </form>` : '';
 
   const pickScript = user ? `
@@ -259,7 +264,15 @@ export function indexPage(o: LayoutOpts & {
     boxes.forEach(function (b) { b.checked = on; });
     sync();
   });
-  form.addEventListener('submit', function (e) { if (!picked().length) e.preventDefault(); });
+  form.addEventListener('submit', function (e) {
+    var n = picked().length;
+    if (!n) { e.preventDefault(); return; }
+    // 批量删除要二次确认：危险操作，误点一下就是一片数据没了
+    var btn = e.submitter;
+    if (btn && btn.getAttribute('data-confirm') === 'delete') {
+      if (!confirm('确定删除选中的 ' + n + ' 条招聘信息吗？\n删除后不可恢复。')) e.preventDefault();
+    }
+  });
   sync();
 })();
 </script>` : '';

@@ -870,6 +870,41 @@ _, lst, _ = reg.get("/")
 # 用记录 id 判断（库里可能残留上次中断测试的同名数据）
 check("已从列表移除", f'/edit/{rid}"' not in lst)
 
+# ---------- 8.1 勾选批量删除 ----------
+print("[8.1] 勾选批量删除")
+_, lst, _ = reg.get("/")
+check("列表页有「删除选定」按钮",
+      'formaction="/delete/selected"' in lst and "🗑 删除选定" in lst)
+check("删除按钮带二次确认标记", 'data-confirm="delete"' in lst)
+check("选择条带 back 隐藏域", 'name="back"' in lst)
+check("提示里说明删除不可恢复", "不可恢复" in lst)
+
+for nm in ("批量删除甲", "批量删除乙"):
+    st, _, _ = reg.post("/add", {"_csrf": csrf(reg, "/add"), "company_name": nm,
+                                 "position": "岗位", "headcount": "1", "salary": "3000",
+                                 "address": "批量删除路 1 号", "phone": "13500001111",
+                                 "requirements": "认真"})
+    check(f"新增「{nm}」", st == 302, st)
+_, ql, _ = reg.get("/?q=" + urllib.parse.quote("批量删除"))
+dids = [int(x) for x in re.findall(r'/preview/(\d+)', ql)]
+check("造出两条待删记录", len(dids) >= 2, dids)
+_tok_del = csrf(reg, "/")
+st, _, hd = reg.post("/delete/selected",
+                     {"_csrf": _tok_del, "ids": [str(i) for i in dids[:2]], "back": "/?page=1"})
+check("批量删除 302", st == 302, st)
+check("删完回到来源页", hd.get("Location") == "/?page=1", hd.get("Location"))
+_, ql2, _ = reg.get("/?q=" + urllib.parse.quote("批量删除"))
+check("两条都从列表消失", "批量删除甲" not in ql2 and "批量删除乙" not in ql2)
+check("记录确实删了", S().get(f"/preview/{dids[0]}")[0] == 404, dids[0])
+
+st, _, _ = reg.post("/delete/selected", {"_csrf": _tok_del})
+check("无勾选时跳回列表", st == 302, st)
+st, _, _ = reg.post("/delete/selected",
+                    {"_csrf": _tok_del, "ids": [str(i) for i in range(1, 202)]})
+check("超过上限被拒（302 回列表）", st == 302, st)
+st, _, _ = S().post("/delete/selected", {"ids": [str(RID)]})
+check("匿名不能批量删除", st in (302, 400), st)
+
 # ---------- 8.5 清理测试账号 ----------
 # 注册限流是「同一 IP 每小时 5 次」，测试账号用完即删，避免反复跑测试把额度用光
 st, _, _ = adm.post(f"/users/{uid}/action", {"_csrf": csrf(adm, "/users"), "action": "delete"})
@@ -1048,6 +1083,17 @@ _, blob3, _ = S().get_raw(f"/docx/{RID}")
 _hx3 = zipfile.ZipFile(io.BytesIO(blob3)).read("word/header1.xml").decode("utf-8", "replace")
 check("清空后回落默认页眉", "炎陵县就业职达站" in _hx3)
 
+# 批量删除：乡镇账号混选时只删自己的，别人的跳过
+_tk = csrf(town, "/")
+st, _, _ = town.post("/delete/selected", {"_csrf": _tk, "ids": [str(RID), str(mid)]})
+check("乡镇混选批量删除 302", st == 302, st)
+check("乡镇混选只删自己的",
+      S().get(f"/preview/{mid}")[0] == 404 and S().get(f"/preview/{RID}")[0] == 200)
+_, tflash, _ = town.get("/")
+check("提示说明跳过了别人的", "已跳过" in tflash)
+st, _, _ = town.post("/delete/selected", {"_csrf": _tk, "ids": [str(RID)]})
+check("乡镇删别人的被拦", st == 302 and S().get(f"/preview/{RID}")[0] == 200, st)
+
 # 清理本节数据
 if mid:
     town.post(f"/delete/{mid}", {"_csrf": csrf(town, "/"), "back": "/"})
@@ -1061,7 +1107,7 @@ check("乡镇测试账号已清理", f">{tname}<" not in uleft)
 print("[9] 审计日志")
 _, au, _ = adm.get("/audit")
 for act in ("登录", "注册申请", "审批通过", "停用账号", "启用账号", "新增", "修改", "删除",
-            "导出 Excel", "直播轮播", "打印简章", "修改页眉", "修改账号类型"):
+            "批量删除", "导出 Excel", "直播轮播", "打印简章", "修改页眉", "修改账号类型"):
     check(f"日志含「{act}」", act in au)
 
 # ---------- 10. 退出 ----------

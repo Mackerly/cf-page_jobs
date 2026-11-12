@@ -183,6 +183,17 @@ export async function deleteRecruit(db: any, id: number) {
   await db.prepare('DELETE FROM recruit WHERE id = ?').bind(id).run();
 }
 
+/** 批量删除（勾选删除用）：D1 单条 SQL 绑定参数上限 100，这里按 90 一批 */
+export async function deleteRecruits(db: any, ids: number[]) {
+  const clean = ids.map((i) => Number(i)).filter((i) => Number.isInteger(i) && i > 0);
+  for (let i = 0; i < clean.length; i += 90) {
+    const chunk = clean.slice(i, i + 90);
+    const ph = chunk.map(() => '?').join(',');
+    await db.prepare(`DELETE FROM recruit WHERE id IN (${ph})`).bind(...chunk).run();
+  }
+  return clean.length;
+}
+
 // --------------------------------------------------------------------------- //
 // 用户
 // --------------------------------------------------------------------------- //

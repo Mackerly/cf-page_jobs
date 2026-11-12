@@ -7,8 +7,9 @@
  * 路由：
  *   公开：/  /preview/:id  /docx/:id  /qr.jpg  /login  /register
  *   公开（另）：/print/:id 单条 A4 打印版
- *   需登录：/add /edit/:id /delete/:id /import /export/excel /docx/zip /docx/range
- *           /docx/selected /wechat/selected /live /print /template.xlsx /password
+ *   需登录：/add /edit/:id /delete/:id /delete/selected /import /export/excel
+ *           /docx/zip /docx/range /docx/selected /wechat/selected /live /print
+ *           /template.xlsx /password
  *   需管理员：/users /users/:id/action /audit /backup.sql
  */
 import { zipSync } from 'fflate';
@@ -30,7 +31,7 @@ const PER_PAGE = 15;
 const MAX_FAILS = 5;
 const LOCK_WINDOW = 300;          // 秒
 const MAX_REG_PER_HOUR = 5;
-const MAX_SELECTED = 200;         // 单次「导出选定为 Word」最大条数
+const MAX_SELECTED = 200;         // 单次「勾选批量操作」（导出 / 删除）最大条数
 const MAX_RANGE = 300;            // 单次「按日期导出 Word」最大条数
 const MAX_WECHAT = 30;            // 单次「复制微信发布」最大条数（一篇推文不宜过长）
 const MAX_LIVE = 300;             // 单次「直播轮播」最大条数（按时间段直播时同样适用）
@@ -254,7 +255,7 @@ async function route(c: Ctx): Promise<Response> {
   const needLogin = [
     '/add', '/import', '/export/excel', '/docx/zip', '/docx/range', '/docx/selected',
     '/wechat/selected', '/live', '/print', '/template.xlsx', '/password', '/backup.sql',
-    '/settings',
+    '/settings', '/delete/selected',
   ];
   const isProtected = needLogin.includes(pathname)
     || /^\/edit\/\d+$/.test(pathname) || /^\/delete\/\d+$/.test(pathname)
@@ -287,6 +288,9 @@ async function route(c: Ctx): Promise<Response> {
   if (pathname === '/docx/range') return handleDocxRange(c);
   if (pathname === '/docx/selected') {
     return method === 'POST' ? handleDocxSelected(c, form!) : redirect(c, '/');
+  }
+  if (pathname === '/delete/selected') {
+    return method === 'POST' ? handleDeleteSelected(c, form!) : redirect(c, '/');
   }
   if (pathname === '/wechat/selected') {
     return method === 'POST' ? handleWechatSelected(c, form!) : redirect(c, '/');
@@ -422,6 +426,7 @@ async function handleIndex(c: Ctx): Promise<Response> {
     showFull, showExpired,
     hiddenFull: showFull ? 0 : byStatus.full,
     hiddenExpired: showExpired ? 0 : byStatus.expired,
+    maxSelected: MAX_SELECTED,
   }));
 }
 
@@ -637,6 +642,48 @@ async function handleDelete(c: Ctx, form: FormData, id: number): Promise<Respons
   await audit(c, '删除', `编号 ${id} ${rec.company_name} - ${rec.position}`);
   await flash(c, 'success', `已删除编号 ${id} 的招聘信息`);
   return redirect(c, auth.safeNext(String(form.get('back') || '/'), '/'));
+}
+
+/**
+ * 勾选批量删除。
+ * 乡镇职达站 / 企业只能删自己发布的：混选时只删自己的，其余跳过并在提示里说明，
+ * 避免「点了没反应」。
+ */
+async function handleDeleteSelected(c: Ctx, form: FormData): Promise<Response> {
+  const ids = collectIds(form);
+  const back = auth.safeNext(String(form.get('back') || '/'), '/');
+
+  if (!ids.length) {
+    await flash(c, 'error', '请先勾选要删除的招聘信息');
+    return redirect(c, back);
+  }
+  if (ids.length > MAX_SELECTED) {
+    await flash(c, 'error', `一次最多删除 ${MAX_SELECTED} 条，请分批勾选（当前 ${ids.length} 条）`);
+    return redirect(c, back);
+  }
+
+  const rows = await db.getRecruitsByIds(c.env.DB, ids);
+  if (!rows.length) {
+    await flash(c, 'error', '勾选的招聘信息已不存在，请刷新页面后重试');
+    return redirect(c, back);
+  }
+
+  const allowed = rows.filter((r: any) => canEditRec(c.user, r));
+  const skipped = rows.length - allowed.length;
+  if (allowed.length) {
+    await db.deleteRecruits(c.env.DB, allowed.map((r: any) => Number(r.id)));
+    await audit(c, '批量删除',
+      `共 ${allowed.length} 条（编号 ${allowed.map((r: any) => r.id).join(',')}）`);
+  }
+
+  if (!allowed.length) {
+    await flash(c, 'error', `勾选的 ${rows.length} 条都不是你发布的，只能删除自己发布的招聘信息`);
+  } else if (skipped) {
+    await flash(c, 'warn', `已删除 ${allowed.length} 条，另有 ${skipped} 条不是你发布的，已跳过`);
+  } else {
+    await flash(c, 'success', `已删除 ${allowed.length} 条招聘信息`);
+  }
+  return redirect(c, back);
 }
 
 // --------------------------------------------------------------------------- //
