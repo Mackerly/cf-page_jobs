@@ -657,6 +657,77 @@ export function livePage(o: {
 
   .empty { margin: auto; text-align: center; color: var(--dim); font-size: 15px; padding: 40px; }
   .empty a { color: #93c5fd; }
+
+  /* ================= 电视模式：16:9 大屏 =================
+     画布固定 1920×1080 逻辑尺寸，JS 按视口等比缩放（scale），
+     所以字号全部用 px 写死即可，在 4K / 1080P / 平板横屏上都不会变形。 */
+  body.tv-mode { background: #05070d; }
+  body.tv-mode .stage {
+    position: fixed; left: 50%; top: 50%;
+    width: 1920px; height: 1080px;
+    transform: translate(-50%, -50%) scale(1);
+    transform-origin: center center;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .07), 0 0 140px rgba(0, 0, 0, .92);
+  }
+  /* 顶部状态条 */
+  body.tv-mode .topbar { padding: 26px 76px 6px; font-size: 22px; gap: 12px; }
+  body.tv-mode .dot { width: 12px; height: 12px; }
+  body.tv-mode .scope { font-size: 19px; }
+  body.tv-mode .counter b { font-size: 26px; }
+  body.tv-mode .tb-btn {
+    height: 42px; padding: 0 18px; font-size: 19px; line-height: 40px;
+    border-radius: 999px; margin-left: 14px;
+  }
+  /* 台标：电视上像台标一样放左上角 */
+  body.tv-mode .brand { padding: 0 76px; justify-content: flex-start; }
+  body.tv-mode .brand img { width: 118px; border-radius: 16px; padding: 6px 8px; }
+  /* 内容：左右两栏（左边岗位、右边岗位要求） */
+  body.tv-mode .slide {
+    display: grid;
+    grid-template-columns: minmax(0, 1.04fr) minmax(0, 1fr);
+    /* 上下各留一条弹性行，让左栏内容在画面里垂直居中 */
+    grid-template-rows: minmax(0, 1fr) auto auto auto auto minmax(0, 1fr);
+    gap: 0 76px;
+    padding: 20px 84px 24px;
+    align-content: stretch;
+    justify-content: initial;
+  }
+  body.tv-mode .slide .company { grid-column: 1; grid-row: 2; }
+  body.tv-mode .slide .position { grid-column: 1; grid-row: 3; }
+  body.tv-mode .slide .meta { grid-column: 1; grid-row: 4; }
+  body.tv-mode .slide .contact { grid-column: 1; grid-row: 5; align-self: start; }
+  body.tv-mode .slide .req-block { grid-column: 2; grid-row: 1 / -1; align-self: stretch; }
+  body.tv-mode .company { font-size: 34px; gap: 14px; }
+  body.tv-mode .company::before { width: 7px; border-radius: 4px; }
+  body.tv-mode .position { font-size: 80px; line-height: 1.1; margin: 12px 0 0; }
+  body.tv-mode .meta { gap: 18px; margin-top: 16px; }
+  body.tv-mode .salary { font-size: 58px; }
+  body.tv-mode .chip { font-size: 23px; padding: 7px 20px; }
+  body.tv-mode .badge { font-size: 21px; padding: 7px 18px; }
+  body.tv-mode .contact { gap: 12px; margin-top: 18px; }
+  body.tv-mode .row { font-size: 26px; gap: 12px; }
+  body.tv-mode .req-block {
+    margin-top: 0; padding: 30px 36px;
+    background: rgba(255, 255, 255, .045);
+    border: 1px solid var(--line); border-radius: 24px;
+  }
+  body.tv-mode .req-title { font-size: 22px; margin-bottom: 20px; letter-spacing: .22em; }
+  body.tv-mode .req { font-size: 31px; line-height: 1.62; max-height: none; flex: 1; min-height: 0; }
+  body.tv-mode .req li { margin-bottom: .34em; }
+  body.tv-mode .req li::before { width: 8px; height: 8px; top: .7em; }
+  body.tv-mode .req::-webkit-scrollbar { width: 4px; }
+  /* 底部进度与控件 */
+  body.tv-mode .bottom { padding: 14px 84px 30px; }
+  body.tv-mode .bar-wrap { height: 6px; border-radius: 6px; }
+  body.tv-mode .controls { margin-top: 18px; font-size: 20px; gap: 12px; }
+  body.tv-mode .controls button,
+  body.tv-mode .controls select { height: 56px; min-width: 56px; font-size: 22px; border-radius: 14px; }
+  body.tv-mode .controls .main { min-width: 68px; }
+  body.tv-mode .controls .back {
+    height: 56px; line-height: 54px; font-size: 20px;
+    border-radius: 14px; padding: 0 18px;
+  }
+  body.tv-mode .hint { bottom: 136px; font-size: 18px; padding: 8px 16px; }
 </style>
 </head>
 <body${logoOn ? '' : ' class="no-logo"'}>
@@ -665,6 +736,8 @@ export function livePage(o: {
     <span class="dot"></span>
     <span>直播招聘 · 自动轮播${o.rangeLabel ? `<em class="scope">${h(o.rangeLabel)}</em>` : ''}</span>
     <span class="counter"><b id="cur">1</b> / <span id="total">${o.items.length}</span></span>
+    <button class="tb-btn" id="layoutToggle" type="button" aria-pressed="false"
+            title="切换 16:9 电视画面（T）">📺 电视</button>
     <button class="tb-btn" id="logoToggle" type="button" aria-pressed="${logoOn ? 'true' : 'false'}"
             title="显示 / 隐藏顶部背景（L）">🖼 背景</button>
   </div>
@@ -714,13 +787,14 @@ export function livePage(o: {
   /* ---------- 长文本自适应：超出可视高度就逐级缩小字号 ---------- */
   function fit() {
     var reqs = document.querySelectorAll('.req[data-fit]');
+    var minSize = document.body.classList.contains('tv-mode') ? 17 : 12;
     for (var i = 0; i < reqs.length; i++) {
       var el = reqs[i];
       el.style.fontSize = '';
       var base = parseFloat(getComputedStyle(el).fontSize);
       var size = base;
-      // 只在真的溢出时缩小，最多缩到 12px
-      while (el.scrollHeight > el.clientHeight + 2 && size > 12) {
+      // 只在真的溢出时缩小，最多缩到 minSize
+      while (el.scrollHeight > el.clientHeight + 2 && size > minSize) {
         size -= 1;
         el.style.fontSize = size + 'px';
       }
@@ -794,6 +868,43 @@ export function livePage(o: {
     toast._t = setTimeout(function () { document.body.classList.remove('show-hint'); }, 1400);
   }
 
+  /* ---------- 画面比例：手机 9:16 / 电视 16:9 ---------- */
+  var stageEl = document.getElementById('stage');
+  var btnLayout = document.getElementById('layoutToggle');
+  var qLayout = new URL(location.href).searchParams.get('layout');   // tv / phone / 空
+  var layoutLocked = (qLayout === 'tv' || qLayout === 'phone');
+  // 没指定时按窗口宽高比自动判断：横屏（≥1.45）当电视用，竖屏当手机用
+  var isTv = qLayout === 'tv' ? true
+           : qLayout === 'phone' ? false
+           : (window.innerWidth / Math.max(1, window.innerHeight) >= 1.45);
+
+  function scaleStage() {
+    if (!isTv) { stageEl.style.transform = ''; return; }
+    var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+    stageEl.style.transform = 'translate(-50%, -50%) scale(' + s + ')';
+  }
+
+  function applyLayout(tv) {
+    isTv = tv;
+    document.body.classList.toggle('tv-mode', tv);
+    if (btnLayout) {
+      btnLayout.textContent = tv ? '📱 手机' : '📺 电视';
+      btnLayout.setAttribute('aria-pressed', tv ? 'true' : 'false');
+      btnLayout.title = tv ? '切回竖屏手机画面（T）' : '切换为 16:9 电视画面（T）';
+    }
+    scaleStage();
+    fit();
+  }
+
+  if (btnLayout) btnLayout.addEventListener('click', function () {
+    applyLayout(!isTv);
+    layoutLocked = true;
+    var u = new URL(location.href);
+    u.searchParams.set('layout', isTv ? 'tv' : 'phone');
+    history.replaceState(null, '', u);
+    toast(isTv ? '已切换为 16:9 电视画面' : '已切换为竖屏手机画面');
+  });
+
   /* ---------- 顶部背景（台标）开关 ---------- */
   var btnLogo = document.getElementById('logoToggle');
   var hasLogo = !document.body.classList.contains('no-logo');
@@ -840,6 +951,7 @@ export function livePage(o: {
     else if (e.key === ' ' || e.code === 'Space') { setPlaying(!playing); e.preventDefault(); }
     else if (e.key === 'f' || e.key === 'F') { document.getElementById('fs').click(); }
     else if ((e.key === 'l' || e.key === 'L') && btnLogo) { setLogo(!hasLogo, true); }
+    else if ((e.key === 't' || e.key === 'T') && btnLayout) { btnLayout.click(); }
   });
 
   /* 左右滑动（竖着滑交给岗位要求的滚动） */
@@ -860,8 +972,15 @@ export function livePage(o: {
     else if (playing) { startTimer(false); lockScreen(); }
   });
 
-  fit();
-  window.addEventListener('resize', fit);
+  applyLayout(isTv);
+  window.addEventListener('resize', function () {
+    if (!layoutLocked) {
+      var wantTv = window.innerWidth / Math.max(1, window.innerHeight) >= 1.45;
+      if (wantTv !== isTv) { applyLayout(wantTv); return; }
+    }
+    scaleStage();
+    fit();
+  });
   startTimer(true);
 })();
 </script>

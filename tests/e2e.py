@@ -668,6 +668,23 @@ check("逗号写法也认", livecomma.count('<section class="slide"') == 2)
 st, livearr, _ = reg.get(f"/live?ids={RID}&ids={lid}")
 check("重复参数写法也认", livearr.count('<section class="slide"') == 2)
 
+# 电视画面（16:9）：1920×1080 逻辑画布等比缩放，左右两栏，仍自动切换
+check("直播页有电视/手机切换按钮", 'id="layoutToggle"' in live and "📺 电视" in live)
+check("含电视模式样式", "body.tv-mode .stage" in live)
+check("电视画布 1920×1080", "width: 1920px; height: 1080px" in live)
+check("电视模式等比 scale 缩放", "scaleStage" in live and "translate(-50%, -50%) scale(" in live)
+check("电视模式左右两栏", "minmax(0, 1.04fr) minmax(0, 1fr)" in live)
+check("岗位要求跨满右栏", "grid-row: 1 / -1" in live)
+check("电视模式字号按 px", "body.tv-mode .position { font-size: 80px" in live)
+check("按宽高比自动判断电视模式", ">= 1.45" in live)
+check("布局选择写回地址栏", "searchParams.set('layout'" in live)
+check("支持 ?layout=tv 直接进电视画面", "qLayout === 'tv'" in live)
+check("快捷键 T 切换画面", "e.key === 't'" in live)
+check("电视模式仍自动轮播", "requestAnimationFrame(paint)" in live)
+check("电视模式长文本仍自适应", "tv-mode') ? 17 : 12" in live)
+st, livetv, _ = reg.get(f"/live?ids={RID}&layout=tv")
+check("?layout=tv 可正常打开", st == 200 and "tv-mode" in livetv, st)
+
 # 按时间段直播：不用逐条勾选，自动把该时间段内的记录全拉进来
 st, liveR, _ = reg.get("/live?start=2020-01-01&end=2030-12-31")
 check("按时间段直播 200", st == 200, st)

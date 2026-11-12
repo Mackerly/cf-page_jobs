@@ -72,7 +72,7 @@ cf-pages/
 │   └── reset-local-db.mjs # 本地库建表+灌数据（不依赖 wrangler 的 D1 声明）
 ├── wrangler.toml          # 仅本地开发用；变量/机密/D1 绑定全部在控制台配（见第三节）
 ├── package.json
-└── tests/e2e.py           # 370 项端到端断言
+└── tests/e2e.py           # 384 项端到端断言
 ```
 
 ---
@@ -400,7 +400,7 @@ Flask 版用 reportlab 在服务端直出 `.pdf`。**Cloudflare 版没有走这�
 | POST | `/docx/selected` | 登录 | 勾选的多条合并为一个 Word（每条一页） |
 | GET/POST | `/print?ids=&start=&end=&q=&show_full=&show_expired=&print=1` | 登录 | 打印版：单条 / 勾选 / 时间段，每条一页连续排版，`print=1` 自动弹打印对话框（单次最多 300 条） |
 | POST | `/wechat/selected` | 登录 | 勾选的多条生成公众号可粘贴的 HTML（单篇最多 30 条） |
-| GET/POST | `/live?ids=&start=&end=&q=&interval=&logo=` | 登录 | 直播轮播：**按时间段自动装载**（`start`/`end`/`q`）或按勾选（`ids`），手机全屏按间隔循环播放（单次最多 300 条；`logo=0` 关掉顶部台标） |
+| GET/POST | `/live?ids=&start=&end=&q=&interval=&logo=` | 登录 | 直播轮播：**按时间段自动装载**（`start`/`end`/`q`）或按勾选（`ids`），手机全屏按间隔循环播放，也可 `layout=tv` 切成 16:9 电视画面（单次最多 300 条；`logo=0` 关掉顶部台标） |
 | GET | `/logo.jpg` | 公开 | 直播页顶部台标（`public/logo.jpg`，已在 `_routes.json` 里排除出函数） |
 | GET | `/backup.sql` | 管理员 | 整库 SQL 备份（表结构 + 索引 + 数据） |
 | GET | `/users` | 管理员 | 账号管理 |
